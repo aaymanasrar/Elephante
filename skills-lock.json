@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "skills": {
+    "excalidraw-diagram": {
+      "source": "coleam00/excalidraw-diagram-skill",
+      "sourceType": "github",
+      "computedHash": "1518f2b4ae190b4ea039e82327d42cd012d6d3f14623b87e7a30c2485e608f1b"
+    },
+    "frontend-design": {
+      "source": "anthropics/claude-code",
+      "sourceType": "github",
+      "computedHash": "e8118284a6365753790d44bb2758a6032b3af27fa84696428d9233f2be0f4e78"
+    }
+  }
+}

@@ -1,9 +1,10 @@
 'use client'
 
-import { useEffect, useState, useRef } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
+import ParticleCanvas from '@/components/ParticleCanvas'
 
 const CATEGORIES = [
   { id: 'outerwear',   label: 'Outerwear'        },
@@ -14,49 +15,24 @@ const CATEGORIES = [
   { id: 'tailoring',   label: 'Suits & Tailoring' },
 ]
 
-// ─── Particle Canvas ──────────────────────────────────────────────────────────
-function ParticleCanvas() {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    let animId: number, W = 0, H = 0
-    interface P { x:number;y:number;vx:number;vy:number;r:number;alpha:number }
-    let particles: P[] = []
-    const resize = () => { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight }
-    const init = () => { particles = Array.from({length:55},()=>({x:Math.random()*W,y:Math.random()*H,vx:(Math.random()-.5)*.35,vy:(Math.random()-.5)*.35,r:Math.random()*1.4+.4,alpha:Math.random()*.45+.1})) }
-    const draw = () => {
-      ctx.clearRect(0,0,W,H)
-      const g = ctx.createRadialGradient(W/2,H/2,0,W/2,H/2,W*.55)
-      g.addColorStop(0,'rgba(255,255,255,0.025)');g.addColorStop(1,'rgba(0,0,0,0)')
-      ctx.fillStyle=g;ctx.fillRect(0,0,W,H)
-      for(let i=0;i<particles.length;i++)for(let j=i+1;j<particles.length;j++){const dx=particles[i].x-particles[j].x,dy=particles[i].y-particles[j].y,d=Math.sqrt(dx*dx+dy*dy);if(d<140){ctx.beginPath();ctx.strokeStyle=`rgba(255,255,255,${.055*(1-d/140)})`;ctx.lineWidth=.5;ctx.moveTo(particles[i].x,particles[i].y);ctx.lineTo(particles[j].x,particles[j].y);ctx.stroke()}}
-      for(const p of particles){ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fillStyle=`rgba(255,255,255,${p.alpha})`;ctx.fill();p.x+=p.vx;p.y+=p.vy;if(p.x<0)p.x=W;if(p.x>W)p.x=0;if(p.y<0)p.y=H;if(p.y>H)p.y=0}
-      animId=requestAnimationFrame(draw)
-    }
-    resize();init();draw()
-    const r=()=>{resize();init()}
-    window.addEventListener('resize',r)
-    return ()=>{cancelAnimationFrame(animId);window.removeEventListener('resize',r)}
-  },[])
-  return <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none z-0"/>
+interface SavedItem {
+  id: string
+  piece_name: string
+  category: string
+  outfits?: { image_url: string }[] | null
 }
 
 // ─── Category Archive ─────────────────────────────────────────────────────────
 export default function CategoryArchive() {
   const params     = useParams()
   const router     = useRouter()
-  const [items, setItems]     = useState<any[]>([])
+  const [items, setItems]     = useState<SavedItem[]>([])
   const [loading, setLoading] = useState(true)
 
   const categoryId = params?.category as string
   const categoryLabel = CATEGORIES.find(c => c.id === categoryId)?.label || categoryId
 
-  useEffect(() => { fetchSavedItems() }, [categoryId])
-
-  const fetchSavedItems = async () => {
+  const fetchSavedItems = useCallback(async () => {
     try {
       setLoading(true)
       const { data: { user } } = await supabase.auth.getUser()
@@ -75,7 +51,9 @@ export default function CategoryArchive() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [categoryId])
+
+  useEffect(() => { fetchSavedItems() }, [fetchSavedItems])
 
   const handleDelete = async (itemId: string, e: React.MouseEvent) => {
     e.stopPropagation()
@@ -151,9 +129,9 @@ export default function CategoryArchive() {
                 </button>
 
                 <div className="w-full aspect-[3/4] bg-zinc-900 border border-zinc-800/50 rounded-xl overflow-hidden group-hover:border-zinc-600 transition-all duration-500">
-                  {item.outfits?.image_url ? (
+                  {item.outfits?.[0]?.image_url ? (
                     <img
-                      src={item.outfits.image_url}
+                      src={item.outfits[0].image_url}
                       alt={item.piece_name}
                       className="w-full h-full object-cover opacity-75 group-hover:opacity-100 group-hover:scale-105 transition-all duration-500"
                     />

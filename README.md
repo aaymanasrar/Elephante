@@ -1,36 +1,95 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Elephante
 
-## Getting Started
+Elephante is a Next.js styling app that helps users discover outfits, save looks, and use AI-assisted wardrobe flows for search, inspiration, and closet organization.
 
-First, run the development server:
+## Features
+
+- AI-assisted styling flows and outfit generation
+- Feed, closet, outfit detail, login, register, and onboarding routes
+- Supabase-backed auth, profiles, saved outfits, and wardrobe data
+- Upload-first wardrobe intake with editable AI-generated tags
+- Reusable UI primitives such as particle background, logo, and loading states
+
+## Tech Stack
+
+- Next.js 16
+- React 19
+- TypeScript
+- Tailwind CSS v4
+- Framer Motion
+- Supabase
+- OpenAI-compatible AI integrations
+
+## Environment Variables
+
+Create `.env.local` from `.env.example`.
+
+Required:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+
+Common AI / server-side keys used by routes and scripts:
+
+- `OPENAI_API_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `SKYWORK_API_KEY`
+- `POLLINATIONS_TOKEN`
+- `HIGGSFIELD_API_KEY_ID`
+- `HIGGSFIELD_API_KEY_SECRET`
+
+Optional provider keys supported by the AI service layer:
+
+- `ANTHROPIC_API_KEY`
+- `GOOGLE_AI_STUDIO_KEY`
+- `GEMINI_API_KEY`
+- `GROQ_API_KEY`
+- `CEREBRAS_API_KEY`
+- `NVIDIA_API_KEY`
+- `LLM7_API_KEY`
+- `OPENROUTER_API_KEY`
+- `MISTRAL_API_KEY`
+- `DEEPSEEK_API_KEY`
+- `KIMI_API_KEY`
+- `OLLAMA_API_KEY`
+- `OLLAMA_MODEL`
+
+## Setup
+
+```bash
+npm install
+npm run dev
+```
+
+Open `http://localhost:3000`.
+
+## Development Commands
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run lint
+npm run typecheck
+npm run build
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Folder Structure
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```text
+app/          App Router pages and API routes
+components/   Reusable UI components
+hooks/        Custom React hooks
+data/         Static app data and translations
+lib/          Pure utilities and helper functions
+services/     API and service integrations
+types/        Shared TypeScript types
+scripts/      Local maintenance scripts
+public/       Static assets
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Deployment
 
-## Learn More
+Deploy on Vercel or another Next.js-compatible platform. Make sure all required environment variables are configured in the target environment before building.
 
-To learn more about Next.js, take a look at the following resources:
+## Security Note
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+`scripts/migrate-excel-images.mjs` now reads `SUPABASE_SERVICE_ROLE_KEY` from the environment. Do not commit service-role keys or other secrets into the repository.

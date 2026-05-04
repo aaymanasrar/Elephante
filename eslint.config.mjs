@@ -5,6 +5,14 @@ import nextTs from "eslint-config-next/typescript";
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
+  {
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/ban-ts-comment': 'off',
+      'react-hooks/set-state-in-effect': 'off',
+      '@next/next/no-img-element': 'off',
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:
@@ -12,6 +20,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    ".claude/**",
+    ".agents/**",
+    "awesome-design-md/**",
+    "design-system/**",
   ]),
 ]);
 

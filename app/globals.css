@@ -3,6 +3,8 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --font-display: 'Cormorant', Georgia, serif;
+  --font-body: 'Montserrat', var(--font-geist-sans), sans-serif;
 }
 
 @theme inline {
@@ -23,4 +25,57 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  scroll-behavior: smooth;
+  overscroll-behavior: none;
+}
+
+/* Selection */
+::selection {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+/* Scrollbar — webkit */
+::-webkit-scrollbar { width: 2px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 99px; }
+
+/* Tap highlight — mobile */
+* { -webkit-tap-highlight-color: transparent; }
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Display font utility */
+.font-display {
+  font-family: var(--font-display);
+}
+
+@keyframes cardIn {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, #1a1a1a 25%, #242424 50%, #1a1a1a 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
 }

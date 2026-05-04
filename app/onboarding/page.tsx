@@ -1,210 +1,144 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import ParticleCanvas from '@/components/ParticleCanvas'
+import LoadingSpinner from '@/components/LoadingSpinner'
+import { COLOR_PALETTES, OCCASION_STYLES, SKIN_TONES, SKIN_UNDERTONES } from '@/data/onboarding'
+import { onboardingTranslations } from '@/data/translations'
+import { useRequireUser } from '@/hooks/useRequireUser'
+import { getFriendlyProfileError } from '@/lib/supabaseErrors'
+import { useLocale } from '@/lib/locale-context'
 
-// ─── Data ─────────────────────────────────────────────────────────────────────
-const SKIN_TONES = [
-  { id: 'light',  color: '#FFE0BD', label: 'Light',  labelAr: 'فاتح' },
-  { id: 'medium', color: '#D2B48C', label: 'Medium', labelAr: 'متوسط' },
-  { id: 'tan',    color: '#AF8154', label: 'Tan',    labelAr: 'أسمر' },
-  { id: 'dark',   color: '#5C3816', label: 'Deep',   labelAr: 'داكن' },
-]
-
-const COLOR_PALETTES = [
-  { id: 'neutral',  label: 'Neutral',  labelAr: 'محايد',  colors: ['#F5F5DC', '#D3D3D3', '#FFFFFF', '#8B7355'] },
-  { id: 'dark',     label: 'Dark',     labelAr: 'داكن',   colors: ['#1A1A1A', '#2F4F4F', '#000080', '#363636'] },
-  { id: 'pastel',   label: 'Pastel',   labelAr: 'باستيل', colors: ['#FFB6C1', '#ADD8E6', '#E6E6FA', '#FFE4E1'] },
-  { id: 'colorful', label: 'Vibrant',  labelAr: 'زاهي',   colors: ['#FF4500', '#32CD32', '#FFD700', '#4169E1'] },
-]
-
-const OCCASION_STYLES = [
-  { id: 'Business Casual', label: 'Business Casual',     labelAr: 'كاجوال أعمال' },
-  { id: 'Smart Casual',    label: 'Smart Casual',        labelAr: 'كاجوال أنيق' },
-  { id: 'Traditional',     label: 'Traditional / Wedding', labelAr: 'تقليدي / أعراس' },
-  { id: 'Formal',          label: 'Formal / Black Tie',  labelAr: 'رسمي / بلاك تاي' },
-  { id: 'Streetwear',      label: 'Streetwear Luxury',   labelAr: 'ستريتوير فاخر' },
-]
-
-const T = {
-  en: {
-    step1Title: 'Skin Tone',
-    step1Sub: 'Select closest match',
-    step2Title: 'Aesthetic',
-    step2Sub: 'Select all that apply',
-    step3Title: 'Lifestyle',
-    step3Sub: 'Select your style vibe',
-    back: 'Back',
-    next: 'Next',
-    finish: 'Finish',
-    saving: 'Saving...',
-  },
-  ar: {
-    step1Title: 'لون البشرة',
-    step1Sub: 'اختر الأقرب لبشرتك',
-    step2Title: 'الذوق',
-    step2Sub: 'اختر ما يناسبك',
-    step3Title: 'نمط الحياة',
-    step3Sub: 'اختر أسلوبك',
-    back: 'رجوع',
-    next: 'التالي',
-    finish: 'إنهاء',
-    saving: 'جارٍ الحفظ...',
-  },
-}
-
-// ─── Particle Canvas ──────────────────────────────────────────────────────────
-function ParticleCanvas() {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-
-    let animId: number
-    let W = 0, H = 0
-
-    interface Particle { x: number; y: number; vx: number; vy: number; r: number; alpha: number }
-    const COUNT = 55
-    let particles: Particle[] = []
-
-    const resize = () => { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight }
-    const init   = () => {
-      particles = Array.from({ length: COUNT }, () => ({
-        x: Math.random() * W, y: Math.random() * H,
-        vx: (Math.random() - 0.5) * 0.35, vy: (Math.random() - 0.5) * 0.35,
-        r: Math.random() * 1.4 + 0.4, alpha: Math.random() * 0.45 + 0.1,
-      }))
-    }
-
-    const draw = () => {
-      ctx.clearRect(0, 0, W, H)
-      const grd = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, W * 0.55)
-      grd.addColorStop(0, 'rgba(255,255,255,0.025)'); grd.addColorStop(1, 'rgba(0,0,0,0)')
-      ctx.fillStyle = grd; ctx.fillRect(0, 0, W, H)
-
-      for (let i = 0; i < COUNT; i++) {
-        for (let j = i + 1; j < COUNT; j++) {
-          const dx = particles[i].x - particles[j].x, dy = particles[i].y - particles[j].y
-          const dist = Math.sqrt(dx * dx + dy * dy)
-          if (dist < 140) {
-            ctx.beginPath()
-            ctx.strokeStyle = `rgba(255,255,255,${0.055 * (1 - dist / 140)})`
-            ctx.lineWidth = 0.5
-            ctx.moveTo(particles[i].x, particles[i].y); ctx.lineTo(particles[j].x, particles[j].y)
-            ctx.stroke()
-          }
-        }
-      }
-
-      for (const p of particles) {
-        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2)
-        ctx.fillStyle = `rgba(255,255,255,${p.alpha})`; ctx.fill()
-        p.x += p.vx; p.y += p.vy
-        if (p.x < 0) p.x = W; if (p.x > W) p.x = 0
-        if (p.y < 0) p.y = H; if (p.y > H) p.y = 0
-      }
-      animId = requestAnimationFrame(draw)
-    }
-
-    resize(); init(); draw()
-    const onResize = () => { resize(); init() }
-    window.addEventListener('resize', onResize)
-    return () => { cancelAnimationFrame(animId); window.removeEventListener('resize', onResize) }
-  }, [])
-
-  return <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none z-0" />
-}
-
-// ─── Onboarding ───────────────────────────────────────────────────────────────
 export default function Onboarding() {
   const router = useRouter()
-  const [step, setStep]                       = useState(1)
-  const [loading, setLoading]                 = useState(false)
-  const [skinTone, setSkinTone]               = useState('')
-  const [selectedPalettes, setSelectedPalettes]   = useState<string[]>([])
+  const { user, loading: userLoading, error: userError } = useRequireUser('/login')
+  const [step, setStep] = useState(1)
+  const [loading, setLoading] = useState(false)
+  const [gender, setGender] = useState('')
+  const [skinTone, setSkinTone] = useState('')
+  const [skinUndertone, setSkinUndertone] = useState('')
+  const [selectedPalettes, setSelectedPalettes] = useState<string[]>([])
   const [selectedOccasions, setSelectedOccasions] = useState<string[]>([])
-  const [lang, setLang]                       = useState<'en' | 'ar'>('en')
+  const { lang, isAr } = useLocale()
+  const [error, setError] = useState('')
 
-  useEffect(() => {
-    const locale = (navigator.language || 'en').toLowerCase()
-    if (locale.startsWith('ar')) setLang('ar')
-  }, [])
+  const t = onboardingTranslations[lang]
+  const arabicFont = isAr ? 'var(--font-arabic, serif)' : 'inherit'
 
-  const t    = T[lang]
-  const isAr = lang === 'ar'
-  const arabicFont = isAr ? "'Noto Naskh Arabic', serif" : 'inherit'
+  const togglePalette = (id: string) => {
+    setSelectedPalettes((previous) => previous.includes(id) ? previous.filter((value) => value !== id) : [...previous, id])
+  }
 
-  const togglePalette = (id: string) =>
-    setSelectedPalettes(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
-
-  const toggleOccasion = (id: string) =>
-    setSelectedOccasions(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+  const toggleOccasion = (id: string) => {
+    setSelectedOccasions((previous) => previous.includes(id) ? previous.filter((value) => value !== id) : [...previous, id])
+  }
 
   const saveProfile = async () => {
-    setLoading(true)
-    const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
+    setLoading(true)
+    setError('')
 
-    const { error } = await supabase.from('profiles').upsert({
-      id: user.id,
-      skin_tone: skinTone,
-      preferred_palette: selectedPalettes.join(', '),
-      selected_occasions: selectedOccasions,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'id' })
+    try {
+      const { error: saveError } = await supabase.from('profiles').upsert({
+        id: user.id,
+        gender,
+        skin_tone: skinTone,
+        skin_undertone: skinUndertone || null,
+        preferred_palette: selectedPalettes.join(', '),
+        selected_occasions: selectedOccasions,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'id' })
 
-    if (error) { alert('Error saving: ' + error.message); setLoading(false) }
-    else router.push('/feed')
+      if (saveError) {
+        setError(getFriendlyProfileError(saveError.message) || t.saveError)
+        return
+      }
+
+      router.push('/feed')
+    } catch {
+      setError(t.saveError)
+    } finally {
+      setLoading(false)
+    }
   }
 
   const canAdvance =
-    (step === 1 && !!skinTone) ||
-    (step === 2 && selectedPalettes.length > 0) ||
-    step === 3
+    (step === 1 && Boolean(gender)) ||
+    (step === 2 && Boolean(skinTone)) ||
+    (step === 3 && selectedPalettes.length > 0) ||
+    step === 4
+
+  if (userLoading) {
+    return (
+      <div className="min-h-screen bg-black text-white flex items-center justify-center">
+        <ParticleCanvas />
+        <div className="relative z-10">
+          <LoadingSpinner text="Loading Onboarding..." />
+        </div>
+      </div>
+    )
+  }
 
   return (
-    <div
-      className="min-h-screen bg-black text-white relative overflow-hidden"
-      dir={isAr ? 'rtl' : 'ltr'}
-    >
+    <div className="min-h-[100dvh] bg-black text-white relative" dir={isAr ? 'rtl' : 'ltr'}>
       <ParticleCanvas />
 
-      <div className="relative z-10 min-h-screen flex items-center justify-center px-4 py-16">
+      <div className="relative z-10 min-h-[100dvh] flex items-center justify-center px-4 py-16 overflow-y-auto">
         <div className="w-full max-w-sm flex flex-col items-center">
-
-          {/* ── Step progress dots ── */}
           <div className="flex gap-2 mb-12">
-            {[1, 2, 3].map(n => (
+            {[1, 2, 3, 4].map((value) => (
               <div
-                key={n}
+                key={value}
                 className="transition-all duration-500 rounded-full"
                 style={{
-                  width:  n === step ? '20px' : '6px',
+                  width: value === step ? '20px' : '6px',
                   height: '6px',
-                  background: n === step ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.15)',
+                  background: value === step ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.15)',
                 }}
               />
             ))}
           </div>
 
-          {/* ── STEP 1: Skin Tone ── */}
           {step === 1 && (
             <div className="w-full text-center animate-in fade-in zoom-in-95 duration-500">
-              <h2
-                className="text-xl font-extralight tracking-tight mb-2 text-white"
-                style={{ fontFamily: arabicFont }}
-              >
+              <h2 className="text-xl font-extralight tracking-tight mb-2 text-white" style={{ fontFamily: arabicFont }}>
                 {t.step1Title}
               </h2>
-              <p
-                className="text-zinc-600 text-[10px] uppercase tracking-widest mb-14"
-                style={{ fontFamily: arabicFont }}
-              >
+              <p className="text-zinc-600 text-[10px] uppercase tracking-widest mb-12" style={{ fontFamily: arabicFont }}>
                 {t.step1Sub}
+              </p>
+
+              <div className="flex gap-4 w-full">
+                {[
+                  { id: 'male', label: isAr ? '\u0631\u062c\u0627\u0644\u064a' : 'Male' },
+                  { id: 'female', label: isAr ? '\u0646\u0633\u0627\u0626\u064a' : 'Female' },
+                ].map((option) => (
+                  <button
+                    key={option.id}
+                    onClick={() => setGender(option.id)}
+                    className={`flex-1 py-10 rounded-2xl border text-sm font-light tracking-[0.25em] uppercase transition-all duration-400 ${
+                      gender === option.id
+                        ? 'bg-white text-black border-white shadow-[0_0_40px_rgba(255,255,255,0.12)]'
+                        : 'bg-zinc-950 text-zinc-500 border-zinc-800 hover:border-zinc-600 hover:text-zinc-300'
+                    }`}
+                    style={{ fontFamily: arabicFont }}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {step === 2 && (
+            <div className="w-full text-center animate-in fade-in zoom-in-95 duration-500">
+              <h2 className="text-xl font-extralight tracking-tight mb-2 text-white" style={{ fontFamily: arabicFont }}>
+                {t.step2Title}
+              </h2>
+              <p className="text-zinc-600 text-[10px] uppercase tracking-widest mb-14" style={{ fontFamily: arabicFont }}>
+                {t.step2Sub}
               </p>
 
               <div className="flex justify-center gap-5 sm:gap-7">
@@ -238,51 +172,68 @@ export default function Onboarding() {
                   )
                 })}
               </div>
+
+              {/* Undertone */}
+              <div className="mt-16">
+                <p className="text-zinc-600 text-[9px] uppercase tracking-[0.25em] mb-5" style={{ fontFamily: arabicFont }}>
+                  {isAr ? 'درجة اللون الداخلية' : 'Undertone'}
+                </p>
+                <div className="flex gap-2.5 justify-center">
+                  {SKIN_UNDERTONES.map((u) => (
+                    <button
+                      key={u.id}
+                      onClick={() => setSkinUndertone(prev => prev === u.id ? '' : u.id)}
+                      className={`flex-1 py-3 px-2 rounded-xl border transition-all duration-300 ${
+                        skinUndertone === u.id
+                          ? 'bg-white text-black border-white'
+                          : 'bg-zinc-950 text-zinc-500 border-zinc-800 hover:border-zinc-600 hover:text-zinc-300'
+                      }`}
+                    >
+                      <div className="text-[10px] font-semibold uppercase tracking-wider" style={{ fontFamily: arabicFont }}>
+                        {isAr ? u.labelAr : u.label}
+                      </div>
+                      <div className={`text-[8px] mt-0.5 ${skinUndertone === u.id ? 'text-zinc-600' : 'text-zinc-700'}`}>
+                        {u.hint}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
 
-          {/* ── STEP 2: Palette ── */}
-          {step === 2 && (
+          {step === 3 && (
             <div className="w-full text-center animate-in fade-in slide-in-from-right-8 duration-500">
-              <h2
-                className="text-xl font-extralight tracking-tight mb-2 text-white"
-                style={{ fontFamily: arabicFont }}
-              >
-                {t.step2Title}
+              <h2 className="text-xl font-extralight tracking-tight mb-2 text-white" style={{ fontFamily: arabicFont }}>
+                {t.step3Title}
               </h2>
-              <p
-                className="text-zinc-600 text-[10px] uppercase tracking-widest mb-10"
-                style={{ fontFamily: arabicFont }}
-              >
-                {t.step2Sub}
+              <p className="text-zinc-600 text-[10px] uppercase tracking-widest mb-10" style={{ fontFamily: arabicFont }}>
+                {t.step3Sub}
               </p>
 
               <div className="flex flex-col gap-3">
-                {COLOR_PALETTES.map((p) => {
-                  const isSelected = selectedPalettes.includes(p.id)
+                {COLOR_PALETTES.map((palette) => {
+                  const isSelected = selectedPalettes.includes(palette.id)
                   return (
                     <button
-                      key={p.id}
-                      onClick={() => togglePalette(p.id)}
+                      key={palette.id}
+                      onClick={() => togglePalette(palette.id)}
                       className={`w-full px-5 py-4 rounded-xl border transition-all duration-300 flex justify-between items-center ${
                         isSelected
                           ? 'bg-zinc-900 border-white/30 shadow-[0_0_16px_rgba(255,255,255,0.07)]'
                           : 'bg-zinc-950 border-zinc-900 hover:border-zinc-700'
                       }`}
                     >
-                      <span
-                        className={`text-[11px] uppercase tracking-[0.18em] ${isSelected ? 'text-white' : 'text-zinc-500'}`}
-                        style={{ fontFamily: arabicFont }}
-                      >
-                        {isAr ? p.labelAr : p.label}
+                      <span className={`text-[11px] uppercase tracking-[0.18em] ${isSelected ? 'text-white' : 'text-zinc-500'}`} style={{ fontFamily: arabicFont }}>
+                        {isAr ? palette.labelAr : palette.label}
                       </span>
                       <div className={`flex items-center gap-2 ${isAr ? 'flex-row-reverse' : ''}`}>
                         <div className="flex -space-x-2">
-                          {p.colors.map((c, i) => (
+                          {palette.colors.map((color) => (
                             <div
-                              key={i}
+                              key={color}
                               className="w-6 h-6 rounded-full border-2 border-black"
-                              style={{ backgroundColor: c }}
+                              style={{ backgroundColor: color }}
                             />
                           ))}
                         </div>
@@ -303,29 +254,22 @@ export default function Onboarding() {
             </div>
           )}
 
-          {/* ── STEP 3: Occasions ── */}
-          {step === 3 && (
+          {step === 4 && (
             <div className="w-full text-center animate-in fade-in slide-in-from-right-8 duration-500">
-              <h2
-                className="text-xl font-extralight tracking-tight mb-2 text-white"
-                style={{ fontFamily: arabicFont }}
-              >
-                {t.step3Title}
+              <h2 className="text-xl font-extralight tracking-tight mb-2 text-white" style={{ fontFamily: arabicFont }}>
+                {t.step4Title}
               </h2>
-              <p
-                className="text-zinc-600 text-[10px] uppercase tracking-widest mb-10"
-                style={{ fontFamily: arabicFont }}
-              >
-                {t.step3Sub}
+              <p className="text-zinc-600 text-[10px] uppercase tracking-widest mb-10" style={{ fontFamily: arabicFont }}>
+                {t.step4Sub}
               </p>
 
               <div className="flex flex-wrap justify-center gap-2.5">
-                {OCCASION_STYLES.map((occ) => {
-                  const isSelected = selectedOccasions.includes(occ.id)
+                {OCCASION_STYLES.map((occasion) => {
+                  const isSelected = selectedOccasions.includes(occasion.id)
                   return (
                     <button
-                      key={occ.id}
-                      onClick={() => toggleOccasion(occ.id)}
+                      key={occasion.id}
+                      onClick={() => toggleOccasion(occasion.id)}
                       className={`px-5 py-2.5 rounded-full border text-[10px] font-semibold uppercase tracking-widest transition-all duration-300 ${
                         isSelected
                           ? 'bg-white text-black border-white shadow-[0_0_16px_rgba(255,255,255,0.25)]'
@@ -333,7 +277,7 @@ export default function Onboarding() {
                       }`}
                       style={{ fontFamily: arabicFont }}
                     >
-                      {isAr ? occ.labelAr : occ.label}
+                      {isAr ? occasion.labelAr : occasion.label}
                     </button>
                   )
                 })}
@@ -341,27 +285,31 @@ export default function Onboarding() {
             </div>
           )}
 
-          {/* ── Nav ── */}
+          {error || userError ? (
+            <p className="mt-8 text-red-400 text-xs text-center" style={{ fontFamily: arabicFont }}>
+              {error || userError || t.loadError}
+            </p>
+          ) : null}
+
           <div className={`mt-16 flex items-center gap-10 ${isAr ? 'flex-row-reverse' : ''}`}>
-            {step > 1 && (
+            {step > 1 ? (
               <button
-                onClick={() => setStep(s => s - 1)}
+                onClick={() => setStep((value) => value - 1)}
                 className="text-zinc-600 text-[10px] uppercase tracking-[0.3em] hover:text-white transition-colors"
                 style={{ fontFamily: arabicFont }}
               >
                 {t.back}
               </button>
-            )}
+            ) : null}
             <button
-              onClick={() => step < 3 ? setStep(s => s + 1) : saveProfile()}
+              onClick={() => step < 4 ? setStep((value) => value + 1) : saveProfile()}
               disabled={!canAdvance || loading}
               className="text-white text-[10px] uppercase tracking-[0.3em] border-b border-transparent hover:border-white/60 transition-all duration-300 disabled:opacity-25 disabled:cursor-not-allowed pb-0.5"
               style={{ fontFamily: arabicFont }}
             >
-              {loading ? t.saving : step === 3 ? t.finish : t.next}
+              {loading ? t.saving : step === 4 ? t.finish : t.next}
             </button>
           </div>
-
         </div>
       </div>
     </div>

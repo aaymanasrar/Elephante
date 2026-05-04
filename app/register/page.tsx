@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import ParticleCanvas from '@/components/ParticleCanvas'
 
 // ─── Translations ─────────────────────────────────────────────────────────────
 const T = {
@@ -37,87 +38,24 @@ const T = {
   },
 }
 
-// ─── Particle Canvas ──────────────────────────────────────────────────────────
-function ParticleCanvas() {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
 
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-
-    let animId: number
-    let W = 0, H = 0
-
-    interface Particle {
-      x: number; y: number
-      vx: number; vy: number
-      r: number; alpha: number
-    }
-
-    const COUNT = 55
-    let particles: Particle[] = []
-
-    const resize = () => {
-      W = canvas.width = window.innerWidth
-      H = canvas.height = window.innerHeight
-    }
-
-    const init = () => {
-      particles = Array.from({ length: COUNT }, () => ({
-        x: Math.random() * W,
-        y: Math.random() * H,
-        vx: (Math.random() - 0.5) * 0.35,
-        vy: (Math.random() - 0.5) * 0.35,
-        r: Math.random() * 1.4 + 0.4,
-        alpha: Math.random() * 0.45 + 0.1,
-      }))
-    }
-
-    const draw = () => {
-      ctx.clearRect(0, 0, W, H)
-      const grd = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, W * 0.55)
-      grd.addColorStop(0, 'rgba(255,255,255,0.025)')
-      grd.addColorStop(1, 'rgba(0,0,0,0)')
-      ctx.fillStyle = grd
-      ctx.fillRect(0, 0, W, H)
-
-      for (let i = 0; i < COUNT; i++) {
-        for (let j = i + 1; j < COUNT; j++) {
-          const dx = particles[i].x - particles[j].x
-          const dy = particles[i].y - particles[j].y
-          const dist = Math.sqrt(dx * dx + dy * dy)
-          if (dist < 140) {
-            ctx.beginPath()
-            ctx.strokeStyle = `rgba(255,255,255,${0.055 * (1 - dist / 140)})`
-            ctx.lineWidth = 0.5
-            ctx.moveTo(particles[i].x, particles[i].y)
-            ctx.lineTo(particles[j].x, particles[j].y)
-            ctx.stroke()
-          }
-        }
-      }
-
-      for (const p of particles) {
-        ctx.beginPath()
-        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2)
-        ctx.fillStyle = `rgba(255,255,255,${p.alpha})`
-        ctx.fill()
-        p.x += p.vx; p.y += p.vy
-        if (p.x < 0) p.x = W; if (p.x > W) p.x = 0
-        if (p.y < 0) p.y = H; if (p.y > H) p.y = 0
-      }
-      animId = requestAnimationFrame(draw)
-    }
-
-    resize(); init(); draw()
-    const onResize = () => { resize(); init() }
-    window.addEventListener('resize', onResize)
-    return () => { cancelAnimationFrame(animId); window.removeEventListener('resize', onResize) }
-  }, [])
-
-  return <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none z-0" />
+function EyeIcon({ hidden }: { hidden: boolean }) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-4 w-4"
+    >
+      <path d="M2.25 12s3.5-6.25 9.75-6.25S21.75 12 21.75 12 18.25 18.25 12 18.25 2.25 12 2.25 12Z" />
+      <circle cx="12" cy="12" r="2.75" />
+      {hidden && <path d="M4 4l16 16" />}
+    </svg>
+  )
 }
 
 // ─── Register ─────────────────────────────────────────────────────────────────
@@ -130,6 +68,7 @@ export default function Register() {
   const [emailStatus, setEmailStatus] = useState<'checking' | 'available' | 'taken' | null>(null)
   const [usernameStatus, setUsernameStatus] = useState<'checking' | 'available' | 'taken' | null>(null)
   const [lang, setLang]               = useState<'en' | 'ar'>('en')
+  const [showPassword, setShowPassword] = useState(false)
   const router = useRouter()
 
   useEffect(() => {
@@ -217,12 +156,12 @@ export default function Register() {
 
   return (
     <div
-      className="min-h-screen bg-black text-white relative overflow-hidden"
+      className="min-h-[100dvh] bg-black text-white relative"
       dir={isAr ? 'rtl' : 'ltr'}
     >
       <ParticleCanvas />
 
-      <div className="relative z-10 min-h-screen flex items-center justify-center px-4 py-12">
+      <div className="relative z-10 min-h-[100dvh] flex items-center justify-center px-4 py-12 overflow-y-auto">
         <div className="w-full max-w-sm flex flex-col items-center">
 
           {/* ── Brand ── */}
@@ -314,20 +253,34 @@ export default function Register() {
             </div>
 
             {/* Password */}
-            <input
-              type="password"
-              placeholder={t.password}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              disabled={loading}
-              autoComplete="new-password"
-              style={{
-                boxShadow: password && !loading ? '0 0 24px rgba(255,255,255,0.07)' : 'none',
-                fontFamily: arabicFont,
-                textAlign: isAr ? 'right' : 'left',
-              }}
-              className={`${inputBase} border-zinc-800`}
-            />
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                placeholder={t.password}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={loading}
+                autoComplete="new-password"
+                style={{
+                  boxShadow: password && !loading ? '0 0 24px rgba(255,255,255,0.07)' : 'none',
+                  fontFamily: arabicFont,
+                  textAlign: isAr ? 'right' : 'left',
+                }}
+                className={`${inputBase} border-zinc-800 ${isAr ? 'pl-11' : 'pr-11'}`}
+              />
+              <button
+                type="button"
+                tabIndex={-1}
+                disabled={loading}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                onClick={() => setShowPassword((value) => !value)}
+                className={`absolute top-1/2 -translate-y-1/2 text-zinc-600 transition-colors hover:text-zinc-300 disabled:pointer-events-none ${
+                  isAr ? 'left-3' : 'right-3'
+                }`}
+              >
+                <EyeIcon hidden={showPassword} />
+              </button>
+            </div>
           </div>
 
           {/* ── Register button ── */}

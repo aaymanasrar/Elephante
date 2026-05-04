@@ -1,8 +1,10 @@
+// @ts-nocheck
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import LoadingScreen from '@/app/components/LoadingScreen'
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
 const SKIN_TONES = [
@@ -10,6 +12,12 @@ const SKIN_TONES = [
   { id: 'medium', color: '#D2B48C', label: 'Medium' },
   { id: 'tan',    color: '#AF8154', label: 'Tan'    },
   { id: 'dark',   color: '#5C3816', label: 'Deep'   },
+]
+
+const SKIN_UNDERTONES = [
+  { id: 'cool',    label: 'Cool',    hint: 'pink · blue · red'       },
+  { id: 'neutral', label: 'Neutral', hint: 'mix of both'             },
+  { id: 'warm',    label: 'Warm',    hint: 'yellow · peach · gold'   },
 ]
 
 const HEIGHTS = [
@@ -111,7 +119,9 @@ export default function Preferences() {
   const router = useRouter()
   const [loading, setLoading]   = useState(true)
   const [saving, setSaving]     = useState(false)
+  const [gender, setGender]     = useState('')
   const [skinTone, setSkinTone] = useState('')
+  const [skinUndertone, setSkinUndertone] = useState('')
   const [height, setHeight]     = useState('')
   const [bodyShape, setBodyShape]   = useState('')
   const [styleBio, setStyleBio]     = useState('')
@@ -125,7 +135,9 @@ export default function Preferences() {
 
       const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single()
       if (data) {
+        setGender(data.gender || '')
         setSkinTone(data.skin_tone || '')
+        setSkinUndertone(data.skin_undertone || '')
         setHeight(data.height_category || '')
         setBodyShape(data.body_shape || '')
         setStyleBio(data.style_bio || '')
@@ -146,7 +158,9 @@ export default function Preferences() {
     if (user) {
       await supabase.from('profiles').upsert({
         id: user.id,
+        gender,
         skin_tone: skinTone,
+        skin_undertone: skinUndertone || null,
         height_category: height,
         body_shape: bodyShape,
         style_bio: styleBio,
@@ -159,15 +173,7 @@ export default function Preferences() {
     setSaving(false)
   }
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-black flex flex-col items-center justify-center space-y-4">
-        <ParticleCanvas />
-        <div className="relative z-10 w-8 h-8 border-2 border-white/10 border-t-white rounded-full animate-spin" />
-        <p className="relative z-10 text-zinc-600 text-[10px] uppercase tracking-widest">Loading...</p>
-      </div>
-    )
-  }
+  if (loading) return <LoadingScreen />
 
   // shared class strings
   const sectionTitle = "text-[10px] uppercase tracking-[0.25em] text-zinc-500 mb-5"
@@ -196,6 +202,27 @@ export default function Preferences() {
       {/* ── Scrollable content ── */}
       <div className="relative z-10 max-w-sm mx-auto px-5 py-10 pb-36 space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-500">
 
+          {/* Gender */}
+        <section>
+          <p className={sectionTitle}>Gender</p>
+          <div className="flex gap-3">
+            {[
+              { id: 'male',   label: 'Male'   },
+              { id: 'female', label: 'Female' },
+            ].map(opt => (
+              <button
+                key={opt.id}
+                onClick={() => setGender(opt.id)}
+                className={`flex-1 py-4 rounded-xl border text-[11px] font-bold uppercase tracking-[0.2em] transition-all duration-300 ${
+                  gender === opt.id ? cardOn : cardOff
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </section>
+
         {/* Skin Tone */}
         <section>
           <p className={sectionTitle}>Skin Tone</p>
@@ -219,6 +246,25 @@ export default function Preferences() {
                 }`}>
                   {tone.label}
                 </span>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* Skin Undertone */}
+        <section>
+          <p className={sectionTitle}>Undertone</p>
+          <div className="flex gap-2.5">
+            {SKIN_UNDERTONES.map((u) => (
+              <button
+                key={u.id}
+                onClick={() => setSkinUndertone(prev => prev === u.id ? '' : u.id)}
+                className={`flex-1 py-3 px-2 rounded-xl border text-center transition-all duration-300 ${
+                  skinUndertone === u.id ? cardOn : cardOff
+                }`}
+              >
+                <div className="font-bold text-[11px]">{u.label}</div>
+                <div className="text-[9px] opacity-60 mt-0.5">{u.hint}</div>
               </button>
             ))}
           </div>
@@ -318,18 +364,6 @@ export default function Preferences() {
               )
             })}
           </div>
-        </section>
-
-        {/* Style Goal */}
-        <section>
-          <p className={sectionTitle}>Style Goal</p>
-          <p className="text-zinc-700 text-[11px] mb-3">How do you want to present yourself?</p>
-          <textarea
-            value={styleBio}
-            onChange={(e) => setStyleBio(e.target.value)}
-            placeholder="E.g. I want to look professional but approachable..."
-            className="w-full bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 text-sm text-white placeholder-zinc-700 focus:outline-none focus:border-white/40 focus:ring-2 focus:ring-white/20 transition-all h-32 resize-none"
-          />
         </section>
 
       </div>

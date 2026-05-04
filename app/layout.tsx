@@ -1,6 +1,10 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import { Geist, Geist_Mono, Cormorant, Montserrat, Noto_Naskh_Arabic } from "next/font/google";
+import { validateRequiredEnv } from "@/lib/env";
+import { LocaleProvider } from "@/lib/locale-context";
 import "./globals.css";
+
+validateRequiredEnv(["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_ANON_KEY"], "the app");
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -12,9 +16,39 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const cormorant = Cormorant({
+  variable: "--font-display",
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  style: ["normal", "italic"],
+  display: "swap",
+});
+
+const montserrat = Montserrat({
+  variable: "--font-body",
+  subsets: ["latin"],
+  weight: ["300", "400", "500", "600", "700"],
+  display: "swap",
+});
+
+const notoNaskhArabic = Noto_Naskh_Arabic({
+  variable: "--font-arabic",
+  subsets: ["arabic"],
+  weight: ["400", "500", "600", "700"],
+  display: "swap",
+});
+
 export const metadata: Metadata = {
   title: "Elephante",
   description: "Your personal stylist, curated for you.",
+  icons: { icon: '/icon.png' },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({
@@ -23,9 +57,28 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
-        {children}
+    <html lang="en" dir="ltr">
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: `(function(){
+var o=AbortController.prototype.abort;
+AbortController.prototype.abort=function(r){o.call(this,r!==undefined?r:new DOMException('The operation was aborted.','AbortError'))};
+window.addEventListener('unhandledrejection',function(e){
+  var r=e.reason;
+  if(r&&(r.name==='AbortError'||r.name==='TimeoutError'))e.preventDefault();
+});
+var ce=console.error.bind(console);
+console.error=function(){
+  var a=arguments[0];
+  if(typeof a==='string'&&(a.includes('AbortError')||a.includes('aborted')||a.includes('The operation was aborted')))return;
+  if(a&&a.name==='AbortError')return;
+  ce.apply(console,arguments);
+};
+})()`.replace(/\n/g,'') }} />
+      </head>
+      <body className={`${geistSans.variable} ${geistMono.variable} ${cormorant.variable} ${montserrat.variable} ${notoNaskhArabic.variable} antialiased`}>
+        <LocaleProvider>
+          {children}
+        </LocaleProvider>
       </body>
     </html>
   );

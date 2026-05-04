@@ -5,6 +5,8 @@
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitReturns": true,
     "noEmit": true,
     "esModuleInterop": true,
     "module": "esnext",
@@ -24,11 +26,12 @@
   },
   "include": [
     "next-env.d.ts",
+    "custom.d.ts",
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
     "**/*.mts"
-, "app/components/TiltCard.tsx"  ],
+  ],
   "exclude": ["node_modules"]
 }

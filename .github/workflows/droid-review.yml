@@ -1,0 +1,48 @@
+name: Factory Droid Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  code-review:
+    name: Code Droid
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Factory Code Droid
+        uses: Factory-AI/droid-action@latest
+        with:
+          factory-token: ${{ secrets.FACTORY_TOKEN }}
+          # Reviews TypeScript, Next.js App Router patterns, API route safety,
+          # Supabase auth flows, and AI provider integration code
+          droid-type: code
+
+  security-review:
+    name: Security Droid
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Factory Security Droid
+        uses: Factory-AI/droid-action@latest
+        with:
+          factory-token: ${{ secrets.FACTORY_TOKEN }}
+          # STRIDE threat modeling — catches auth bypass, injection, and
+          # API key exposure risks before they reach production
+          droid-type: security

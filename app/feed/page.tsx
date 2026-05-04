@@ -1,55 +1,81 @@
 'use client'
 
-import { useEffect, useState, useRef, Suspense } from 'react'
-import { supabase } from '@/lib/supabase'
+import Image from 'next/image'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import LoadingScreen from '@/app/components/LoadingScreen'
+import IntroTour from '@/app/components/IntroTour'
+import FeedHeader from '@/app/feed/components/FeedHeader'
+import SearchFooter from '@/app/feed/components/SearchFooter'
+import LoadingSpinner from '@/components/LoadingSpinner'
+import ParticleCanvas from '@/components/ParticleCanvas'
+import { getBoostedOutfits, saveSearchClick } from '@/lib/feedSearchMemory'
+import { scoreOutfit } from '@/lib/feedMatching'
+import { feedTranslations } from '@/data/translations'
+import { useLocale } from '@/lib/locale-context'
+import { searchOutfits } from '@/lib/searchOutfits'
+import { useKeyboardOffset } from '@/hooks/useFeedUi'
+import { useElephanteData } from '@/hooks/useElephanteData'
+import { useFeedSearch } from '@/hooks/useFeedSearch'
+import { useWardrobeAttachment } from '@/hooks/useWardrobeAttachment'
+import { useRequireUser } from '@/hooks/useRequireUser'
+import { canUseNextImage } from '@/lib/image'
+import type { Outfit } from '@/types/outfit'
 
-// ─── Glitch Placeholder ───────────────────────────────────────────────────────
 const EN = 'What shall we dress you for today?'
-const AR = 'بماذا نُلبسك اليوم؟'
-const ARABIC_CHARS = 'ابتثجحخدذرزسشصضطظعغفقكلمنهوي'
+const AR = '\u0628\u0645\u0627\u0630\u0627 \u0646\u064f\u0644\u0628\u0633\u0643 \u0627\u0644\u064a\u0648\u0645\u061f'
+const ARABIC_CHARS = '\u0627\u0628\u062a\u062b\u062c\u062d\u062e\u062f\u0630\u0631\u0632\u0633\u0634\u0635\u0636\u0637\u0638\u0639\u063a\u0641\u0642\u0643\u0644\u0645\u0646\u0647\u0648\u064a'
+const NL_SIGNALS = ['suggest', 'suggestion', 'recommend', 'recommendation', 'help', 'need', 'want', 'have', 'going', 'date', 'event', 'tonight', 'evening', 'morning', 'special', 'something', 'occasion', 'meeting', 'interview', 'wedding', 'party', 'dinner', 'casual', 'formal', 'office', 'work', 'business', 'weekend', 'summer', 'winter', 'night', 'out', 'smart', 'what', 'which', 'give', 'me', 'feel', 'look', 'wear', 'style', 'fit', 'outfit', 'dress', 'rate']
+const POSSESSION_PREFIXES = ['i have', 'i own', "i've got", 'i got', "i'm wearing", 'wearing my', 'i wear']
 
 function GlitchPlaceholder({ active }: { active: boolean }) {
+  const { isAr } = useLocale()
   const [display, setDisplay] = useState(EN)
   const [glitching, setGlitching] = useState(false)
   const frameRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
-    if (active) return // hide when user is typing
+    // When device is Arabic, just show the Arabic placeholder statically
+    if (isAr) {
+      setDisplay(AR)
+      return
+    }
+
+    if (active) return
 
     let cancelled = false
-
     const scrambleTo = (target: string, onDone: () => void) => {
-      const source = target === AR ? EN : AR
       let frame = 0
       const totalFrames = 18
 
       const tick = () => {
         if (cancelled) return
-        frame++
+        frame += 1
         const progress = frame / totalFrames
-        const result = target.split('').map((char, i) => {
+        const result = target.split('').map((char, index) => {
           if (char === ' ') return ' '
-          if (i / target.length < progress) return char
-          // random glitch char
+          if (index / target.length < progress) return char
           const pool = target === AR ? 'ABCDEFGHIJabcdefghij' : ARABIC_CHARS
-          return pool[Math.floor(Math.random() * pool.length)]
+          return pool[Math.floor(Math.random() * pool.length)] || char
         }).join('')
+
         setDisplay(result)
         if (frame < totalFrames) {
           frameRef.current = setTimeout(tick, 45)
         } else {
           setDisplay(target)
           setGlitching(false)
-          onDone()
+          // Check cancelled flag before calling onDone to ensure chain is fully severed on unmount
+          if (!cancelled) onDone()
         }
       }
+
       tick()
     }
 
     const cycle = () => {
       if (cancelled) return
-      // wait 2.8s in English → glitch to Arabic → hold 2s → glitch back
+
       frameRef.current = setTimeout(() => {
         if (cancelled) return
         setGlitching(true)
@@ -58,7 +84,9 @@ function GlitchPlaceholder({ active }: { active: boolean }) {
             if (cancelled) return
             setGlitching(true)
             scrambleTo(EN, () => {
-              frameRef.current = setTimeout(cycle, 2800)
+              if (!cancelled) {
+                frameRef.current = setTimeout(cycle, 2800)
+              }
             })
           }, 2000)
         })
@@ -67,21 +95,22 @@ function GlitchPlaceholder({ active }: { active: boolean }) {
 
     setDisplay(EN)
     cycle()
+
     return () => {
       cancelled = true
       if (frameRef.current) clearTimeout(frameRef.current)
     }
-  }, [active])
+  }, [active, isAr])
 
   if (active) return null
 
-  const isArabic = display === AR || (glitching && display.split('').some(c => ARABIC_CHARS.includes(c) && c !== ' '))
+  const isArabic = isAr || display === AR || (glitching && display.split('').some((char) => ARABIC_CHARS.includes(char) && char !== ' '))
 
   return (
     <span
-      className="absolute inset-x-4 top-1/2 -translate-y-1/2 pointer-events-none select-none text-zinc-600 text-base sm:text-sm text-center truncate"
+      className={`absolute z-10 top-1/2 -translate-y-1/2 pointer-events-none select-none text-zinc-500 text-base sm:text-sm truncate ${isAr ? 'right-6 left-14 text-right' : 'left-6 right-12 text-left'}`}
       style={{
-        fontFamily: isArabic ? "'Noto Naskh Arabic', serif" : 'inherit',
+        fontFamily: isArabic ? 'var(--font-arabic, serif)' : 'inherit',
         letterSpacing: glitching ? '0.02em' : 'normal',
         textShadow: glitching ? '0 0 8px rgba(255,255,255,0.15)' : 'none',
         transition: 'text-shadow 0.1s',
@@ -92,345 +121,554 @@ function GlitchPlaceholder({ active }: { active: boolean }) {
   )
 }
 
-// ─── Particle Background ──────────────────────────────────────────────────────
-function ParticleCanvas() {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+function TypewriterText({ text, speed = 18 }: { text: string; speed?: number }) {
+  const [displayed, setDisplayed] = useState('')
+  const [done, setDone] = useState(false)
 
   useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
+    setDisplayed('')
+    setDone(false)
+    if (!text) return
 
-    let animId: number
-    let W = 0, H = 0
-
-    interface Particle {
-      x: number; y: number
-      vx: number; vy: number
-      r: number; alpha: number
-    }
-
-    const COUNT = 55
-    let particles: Particle[] = []
-
-    const resize = () => {
-      W = canvas.width = window.innerWidth
-      H = canvas.height = window.innerHeight
-    }
-
-    const init = () => {
-      particles = Array.from({ length: COUNT }, () => ({
-        x: Math.random() * W,
-        y: Math.random() * H,
-        vx: (Math.random() - 0.5) * 0.35,
-        vy: (Math.random() - 0.5) * 0.35,
-        r: Math.random() * 1.4 + 0.4,
-        alpha: Math.random() * 0.45 + 0.1,
-      }))
-    }
-
-    const draw = () => {
-      ctx.clearRect(0, 0, W, H)
-
-      // subtle radial glow in centre
-      const grd = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, W * 0.55)
-      grd.addColorStop(0, 'rgba(255,255,255,0.025)')
-      grd.addColorStop(1, 'rgba(0,0,0,0)')
-      ctx.fillStyle = grd
-      ctx.fillRect(0, 0, W, H)
-
-      // connection lines
-      for (let i = 0; i < COUNT; i++) {
-        for (let j = i + 1; j < COUNT; j++) {
-          const dx = particles[i].x - particles[j].x
-          const dy = particles[i].y - particles[j].y
-          const dist = Math.sqrt(dx * dx + dy * dy)
-          if (dist < 140) {
-            ctx.beginPath()
-            ctx.strokeStyle = `rgba(255,255,255,${0.055 * (1 - dist / 140)})`
-            ctx.lineWidth = 0.5
-            ctx.moveTo(particles[i].x, particles[i].y)
-            ctx.lineTo(particles[j].x, particles[j].y)
-            ctx.stroke()
-          }
-        }
+    let index = 0
+    const timer = setInterval(() => {
+      index += 1
+      setDisplayed(text.slice(0, index))
+      if (index >= text.length) {
+        clearInterval(timer)
+        setDone(true)
       }
+    }, speed)
 
-      // dots
-      for (const p of particles) {
-        ctx.beginPath()
-        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2)
-        ctx.fillStyle = `rgba(255,255,255,${p.alpha})`
-        ctx.fill()
-
-        p.x += p.vx
-        p.y += p.vy
-        if (p.x < 0) p.x = W
-        if (p.x > W) p.x = 0
-        if (p.y < 0) p.y = H
-        if (p.y > H) p.y = 0
-      }
-
-      animId = requestAnimationFrame(draw)
-    }
-
-    resize()
-    init()
-    draw()
-    window.addEventListener('resize', () => { resize(); init() })
-
-    return () => {
-      cancelAnimationFrame(animId)
-      window.removeEventListener('resize', () => { resize(); init() })
-    }
-  }, [])
+    return () => clearInterval(timer)
+  }, [text, speed])
 
   return (
-    <canvas
-      ref={canvasRef}
-      className="fixed inset-0 pointer-events-none z-0"
-      style={{ background: 'transparent' }}
-    />
+    <span>
+      {displayed}
+      {!done ? <span className="inline-block w-[2px] h-[1em] bg-zinc-400 align-middle ml-[1px] animate-pulse" /> : null}
+    </span>
   )
 }
 
-// ─── Feed ─────────────────────────────────────────────────────────────────────
-function FeedContent() {
-  const router = useRouter()
-  const searchParams = useSearchParams()
-  const [searchQuery, setSearchQuery] = useState(searchParams?.get('q') || '')
-  const [isThinking, setIsThinking] = useState(false)
-  const [aiStatus, setAiStatus] = useState('Listening...')
-  const [displayName, setDisplayName] = useState<string>('User')
+function getOutfitGender(outfit: Outfit): 'male' | 'female' | 'unisex' {
+  const aesthetic = (outfit.aesthetic || '').toLowerCase()
+  const code = (outfit.outfit_code || '').toUpperCase()
 
-  const [recommendations, setRecommendations] = useState<any[]>([])
-  const [allOutfits, setAllOutfits] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
+  if (aesthetic.includes('female') || /^F(BC|F|SC)/.test(code)) return 'female'
+  if (aesthetic.includes('male') || /^(TH|WS|WB|M(BC|F|SC))/.test(code)) return 'male'
+  return 'unisex'
+}
 
-  // true = user has typed something (title should rise to top)
-  const isSearching = searchQuery.length > 0
+function isNaturalQuery(query: string) {
+  const lower = query.trim().toLowerCase()
+  if (!lower) return false
+  if (POSSESSION_PREFIXES.some((prefix) => lower.startsWith(prefix))) return true
+  if (/[?!]/.test(lower)) return true
+  const words = lower.split(/\s+/)
+  if (words.length >= 2 && words.some((word) => NL_SIGNALS.includes(word))) return true
+  if (words.length >= 4) return true
+  return words.some((word) => NL_SIGNALS.includes(word))
+}
 
-  useEffect(() => { fetchData() }, [])
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search)
-      if (searchQuery) { params.set('q', searchQuery) } else { params.delete('q') }
-      const newUrl = searchQuery ? `?${params.toString()}` : '/feed'
-      window.history.replaceState({}, '', newUrl)
-    }
-  }, [searchQuery])
-
-  useEffect(() => {
-    if (!searchQuery) { setIsThinking(false); return }
-    setIsThinking(true)
-    setAiStatus('Analyzing...')
-    const timers = [
-      setTimeout(() => setAiStatus('Curating looks...'), 600),
-      setTimeout(() => setIsThinking(false), 1200),
-    ]
-    return () => timers.forEach(clearTimeout)
-  }, [searchQuery])
-
-  const fetchData = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { router.push('/login'); return }
-
-      const name = user.email?.split('@')[0] || 'Member'
-      setDisplayName(name)
-
-      const { data: savedItems } = await supabase
-        .from('saved_outfits').select('outfits(style)').eq('user_id', user.id)
-
-      const userStyles = savedItems?.map((item: any) => item?.outfits?.style).filter(Boolean) || []
-
-      // Fetch both tables — excel_outfits (priority) + outfits
-      const [{ data: excelOutfits }, { data: dbOutfits }] = await Promise.all([
-        supabase.from('excel_outfits').select('*'),
-        supabase.from('outfits').select('*'),
-      ])
-
-      const combined = [
-        ...(excelOutfits || []).map((o: any) => ({ ...o, _source: 'excel' })),
-        ...(dbOutfits    || []).map((o: any) => ({ ...o, _source: 'db'    })),
-      ]
-
-      setAllOutfits(combined)
-
-      if (userStyles.length > 0) {
-        const recs = combined.filter(o => userStyles.includes(o?.style) || userStyles.includes(o?.style_category))
-        setRecommendations(recs.length > 0 ? recs : combined)
-      } else {
-        setRecommendations(combined)
-      }
-    } catch (error) {
-      console.error('Elephante Data Error:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  if (loading) {
+function OutfitCardImage({ outfit, alt }: { outfit: Outfit; alt: string }) {
+  if (!outfit.image_url) {
     return (
-      <div className="min-h-screen bg-black flex flex-col items-center justify-center text-white space-y-4">
-        <div className="w-8 h-8 border-2 border-white/10 border-t-white rounded-full animate-spin" />
-        <p className="text-zinc-500 font-mono text-[10px] uppercase tracking-widest">Loading Feed...</p>
+      <div className="w-full h-full flex items-center justify-center">
+        <span className="text-zinc-800 text-[9px] uppercase tracking-widest">No image</span>
       </div>
     )
   }
 
-  const filteredOutfits = (allOutfits || []).filter(item => {
-    if (!searchQuery) return true
-    const queryParts = searchQuery.toLowerCase().trim().split(' ')
-    // combine all searchable fields from both outfits and excel_outfits schemas
-    const blob = [
-      item?.style, item?.style_category, item?.outfit_name,
-      item?.color_scheme, item?.color_palette,
-      item?.top, item?.top_wear, item?.bottom, item?.bottom_wear,
-      item?.shoes, item?.accessories, item?.outerwear,
-      item?.occasions, item?.when_to_wear, item?.outfit_details,
-      item?.material_notes, item?.brand, item?.pieces,
-    ].filter(Boolean).join(' ').toLowerCase()
-
-    const expanded = blob
-      + (blob.includes('business') || blob.includes('meeting') ? ' office work corporate' : '')
-      + (blob.includes('wedding') || blob.includes('formal event') ? ' gala party celebration' : '')
-      + (blob.includes('thobe') ? ' thob dishdasha traditional saudi' : '')
-      + (blob.includes('casual') ? ' relaxed weekend everyday' : '')
-
-    return queryParts.every(part => expanded.includes(part))
-  })
+  if (canUseNextImage(outfit.image_url)) {
+    return (
+      <Image
+        src={outfit.image_url}
+        alt={alt}
+        fill
+        unoptimized
+        sizes="(max-width: 768px) 50vw, 33vw"
+        className="w-full h-full object-cover object-top opacity-75 group-hover:opacity-100 transition-opacity duration-400"
+      />
+    )
+  }
 
   return (
-    <div className="min-h-screen bg-black text-white font-sans selection:bg-zinc-800 relative flex flex-col overflow-hidden">
+    <img
+      src={outfit.image_url}
+      alt={alt}
+      className="w-full h-full object-cover object-top opacity-75 group-hover:opacity-100 transition-opacity duration-400"
+      loading="lazy"
+    />
+  )
+}
 
-      {/* ── Particle background ── */}
-      <ParticleCanvas />
+function GeneratedOutfitImage({
+  src,
+  alt,
+  className,
+}: {
+  src: string
+  alt: string
+  className: string
+}) {
+  if (canUseNextImage(src)) {
+    return (
+      <Image
+        src={src}
+        alt={alt}
+        fill
+        unoptimized
+        sizes="(max-width: 768px) 50vw, 33vw"
+        className={className}
+      />
+    )
+  }
 
-      {/* ── Closet icon (top-right, always) ── */}
-      <button
-        onClick={() => router.push('/closet')}
-        className="fixed top-8 sm:top-10 right-4 sm:right-6 z-50 min-w-[44px] min-h-[44px] flex items-center justify-center text-zinc-600 hover:text-white transition"
-      >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <polyline points="21 8 21 21 3 21 3 8" />
-          <rect x="1" y="3" width="22" height="5" />
-          <line x1="10" y1="12" x2="14" y2="12" />
-        </svg>
-      </button>
+  return <img src={src} alt={alt} className={className} loading="lazy" />
+}
 
-      {/*
-        ── TITLE BLOCK ──
-        Default: absolutely centred (both axes).
-        When searching: transition to top position (matching original layout).
-      */}
+function FeedContent() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const { loading: authLoading } = useRequireUser('/login')
+  const initialQuery = searchParams?.get('q') || ''
+  const replaceUrl = useCallback((url: string) => {
+    router.replace(url, { scroll: false })
+  }, [router])
+
+  const kbOffset = useKeyboardOffset()
+
+  // Chat display state
+  const [pendingUserMessage, setPendingUserMessage] = useState('')
+  const [chipDisplayMap, setChipDisplayMap] = useState<Record<string, string>>({})
+  const prevHistoryLenRef = useRef(0)
+  const chatEndRef = useRef<HTMLDivElement>(null)
+  const {
+    allOutfits,
+    allOutfitsRef,
+    displayName,
+    loading,
+    showTour,
+    userBodyShape,
+    userGender,
+    userHeight,
+    userId,
+    userPalettes,
+    userSkinTone,
+    userStylePref,
+    setShowTour,
+  } = useElephanteData(() => router.push('/login'))
+
+  const {
+    aiContext,
+    buildFollowUpPrompt,
+    chatHistory,
+    clearActiveSearchState,
+    curateTriggered,
+    finalBanner,
+    generatedOutfit,
+    generatingOutfit,
+    handleGeneratedTap,
+    inputValue,
+    isSearching,
+    isThinking,
+    saveFeedState,
+    searchQuery,
+    setInputValue,
+    setSearchQuery,
+    triggerCuration,
+  } = useFeedSearch({
+    allOutfits,
+    allOutfitsRef,
+    displayName,
+    getOutfitGender,
+    initialQuery,
+    isNaturalQuery,
+    onNavigateToLogin: () => router.push('/login'),
+    onNavigateToOutfit: (id) => router.push(`/outfit/${id}`),
+    replaceUrl,
+    searchParams,
+    userBodyShape,
+    userGender,
+    userHeight,
+    userSkinTone,
+    userStylePref,
+  })
+
+  const {
+    attachment,
+    clearAttachment,
+    confirmAttachment,
+    fileInputRef,
+    handleAttachment,
+    updateTag,
+  } = useWardrobeAttachment(
+    userId,
+    (query) => {
+      setInputValue(query)
+      setSearchQuery(query)
+    },
+    () => {
+      setInputValue('')
+      setSearchQuery('')
+      clearActiveSearchState()
+    }
+  )
+
+  // Clear pending message when chatHistory grows (AI responded)
+  useEffect(() => {
+    if (chatHistory.length > prevHistoryLenRef.current) {
+      setPendingUserMessage('')
+    }
+    if (chatHistory.length === 0) {
+      setChipDisplayMap({})
+    }
+    prevHistoryLenRef.current = chatHistory.length
+  }, [chatHistory.length])
+
+  // Auto-scroll to latest message
+  useEffect(() => {
+    if (pendingUserMessage || isThinking || chatHistory.length > 0) {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    }
+  }, [chatHistory.length, isThinking, pendingUserMessage, finalBanner])
+
+  // Chip tap: show chip label in chat, send full prompt to AI
+  const handleChipTap = useCallback((chip: string) => {
+    const prompt = buildFollowUpPrompt(chip)
+    setChipDisplayMap((previous) => ({ ...previous, [prompt]: chip }))
+    setPendingUserMessage(chip)
+    setInputValue('')
+    setSearchQuery(prompt)
+  }, [buildFollowUpPrompt, setInputValue, setSearchQuery])
+
+  const boostedIds = aiContext?.intent ? getBoostedOutfits(aiContext.intent) : []
+
+  const genderFiltered = useMemo(() => {
+    return allOutfits.filter((item) => {
+      const outfitGender = getOutfitGender(item)
+      return outfitGender === 'unisex' || outfitGender === userGender
+    })
+  }, [allOutfits, userGender])
+
+  const sortedFeed = useMemo(() => {
+    return [...genderFiltered].sort(
+      (a, b) => scoreOutfit(b, userSkinTone, userPalettes, userBodyShape) - scoreOutfit(a, userSkinTone, userPalettes, userBodyShape)
+    )
+  }, [genderFiltered, userSkinTone, userPalettes, userBodyShape])
+
+  const filteredOutfits: Outfit[] = useMemo(() => {
+    if (!searchQuery) return sortedFeed
+    if (aiContext?.suggestions?.length) {
+      return aiContext.suggestions
+        .map((suggestion) => genderFiltered.find((outfit) => String(outfit.id) === String(suggestion.outfit_id)))
+        .filter((outfit): outfit is Outfit => Boolean(outfit))
+    }
+    if (aiContext) return []
+    return searchOutfits(genderFiltered, searchQuery).sort((a, b) => {
+      const aScore = (boostedIds.includes(String(a.id)) ? 10 : 0) + scoreOutfit(a, userSkinTone, userPalettes, userBodyShape)
+      const bScore = (boostedIds.includes(String(b.id)) ? 10 : 0) + scoreOutfit(b, userSkinTone, userPalettes, userBodyShape)
+      return bScore - aScore
+    })
+  }, [searchQuery, aiContext, sortedFeed, genderFiltered, boostedIds, userSkinTone, userPalettes, userBodyShape])
+
+  if (loading || authLoading) return <LoadingScreen />
+
+  return (
+    <div className="bg-black text-white font-sans selection:bg-zinc-800" style={{ height: '100dvh' }}>
+      {showTour ? <IntroTour onDone={() => setShowTour(false)} /> : null}
+
+      <ParticleCanvas desktopCount={36} mobileCount={24} />
+
+      <FeedHeader
+        displayName={displayName}
+        isSearching={isSearching}
+        onGoHome={() => {
+          setInputValue('')
+          setSearchQuery('')
+          setPendingUserMessage('')
+          setChipDisplayMap({})
+          clearActiveSearchState()
+        }}
+        onOpenAiStylist={() => router.push('/ai-stylist')}
+        onOpenCloset={() => router.push('/closet')}
+        onOpenProfile={() => router.push('/profile')}
+      />
+
       <div
-        className={`
-          fixed left-0 right-0 z-30 flex flex-col items-center
-          transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]
-          ${isSearching
-            ? 'top-8 sm:top-10'          // ← risen to top (Apple-style)
-            : 'top-1/2 -translate-y-1/2' // ← centred vertically
-          }
-        `}
+        className="fixed left-0 right-0 z-20 overflow-y-auto overscroll-contain"
+        style={{
+          top: 0,
+          bottom: 0,
+          WebkitOverflowScrolling: 'touch',
+        } as React.CSSProperties}
       >
-        <h1
-          className={`
-            font-bold tracking-[0.3em] sm:tracking-[0.4em] text-zinc-500 uppercase
-            transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]
-            ${isSearching ? 'text-[11px] sm:text-xs' : 'text-[15px] sm:text-base'}
-          `}
-        >
-          Elephante AI
-        </h1>
+        {isSearching ? (
+          <div className="px-4 sm:px-6 pb-8 animate-in fade-in slide-in-from-bottom-4 duration-500" style={{ paddingTop: 'calc(max(2rem, env(safe-area-inset-top)) + 60px)' }}>
 
-        {/* @username — hidden when searching */}
-        <button
-          onClick={() => router.push('/profile')}
-          className={`
-            group flex flex-col items-center mt-3
-            transition-all duration-500
-            ${isSearching ? 'opacity-0 pointer-events-none scale-95' : 'opacity-100'}
-          `}
-        >
-          <span className="text-zinc-500 text-[10px] sm:text-[9px] uppercase tracking-[0.2em] font-medium group-hover:text-white transition-colors">
-            @{displayName}
-          </span>
-          <div className="h-[1px] w-0 bg-white group-hover:w-full transition-all duration-300" />
-        </button>
-      </div>
+            {/* ── Chat thread ── */}
+            <div className="flex flex-col gap-2.5 mb-4">
+              {chatHistory.map((turn, index) => {
+                const isLatestAssistant = turn.role === 'assistant' && index === chatHistory.length - 1 && Boolean(finalBanner)
+                const displayText = turn.role === 'user'
+                  ? (chipDisplayMap[turn.content] ?? turn.content)
+                  : turn.content
+                const isFaded = index < chatHistory.length - 2
 
-      {/* ── Search results (appear below the risen header) ── */}
-      {isSearching && !isThinking && (
-        <div className="relative z-20 flex-1 px-4 sm:px-6 pt-28 sm:pt-24 pb-36 sm:pb-32 overflow-y-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-zinc-500 text-[11px] sm:text-xs uppercase tracking-wider sm:tracking-widest">Archive Results</h2>
-            <div className="h-px bg-zinc-900 flex-1 ml-4" />
-          </div>
-          <div className="grid grid-cols-2 gap-y-4 sm:gap-y-6 gap-x-3 sm:gap-x-4">
-            {filteredOutfits.map((outfit) => (
-              <div
-                key={outfit?.id}
-                className="group cursor-pointer"
-                onClick={() => router.push(`/outfit/${outfit?.id}`)}
-              >
-                <div className="relative w-full aspect-[3/4] overflow-hidden rounded-xl sm:rounded-2xl bg-zinc-900">
-                  <img
-                    src={outfit?.image_url}
-                    alt="Outfit"
-                    className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-all duration-500"
-                  />
+                return (
+                  <div
+                    key={index}
+                    className={`flex items-end gap-2 transition-opacity duration-300 ${turn.role === 'user' ? 'justify-end' : 'justify-start'} ${isFaded ? 'opacity-45' : 'opacity-100'}`}
+                  >
+                    {turn.role === 'assistant' && (
+                      <div className="w-11 h-11 flex items-center justify-center flex-shrink-0 mb-0.5">
+                        <img src="/logo.png" alt="" className="w-9 h-9 object-contain" style={{ filter: 'invert(1)', opacity: 1 }} aria-hidden="true" />
+                      </div>
+                    )}
+                    <div className={`max-w-[78%] px-4 py-2.5 text-[13px] leading-relaxed ${
+                      turn.role === 'user'
+                        ? 'bg-zinc-800 text-white rounded-2xl rounded-br-sm'
+                        : 'bg-zinc-900/80 border border-zinc-800/60 text-zinc-200 rounded-2xl rounded-bl-sm'
+                    }`}>
+                      {isLatestAssistant ? (
+                        <TypewriterText key={displayText} text={displayText} speed={14} />
+                      ) : displayText}
+                    </div>
+                  </div>
+                )
+              })}
+
+              {/* Colour palette under the latest assistant bubble */}
+              {!isThinking && finalBanner?.colors?.length ? (
+                <div className="ml-8 animate-in fade-in duration-500" style={{ animationDelay: '700ms', animationFillMode: 'both' }}>
+                  <p className="text-[9px] uppercase tracking-[0.3em] text-zinc-600 mb-2">Your colour palette</p>
+                  <div className="flex flex-wrap gap-2">
+                    {finalBanner.colors.map((color) => (
+                      <div key={`${color.hex}-${color.name}`} className="flex flex-col items-center gap-1">
+                        <div className="w-8 h-8 rounded-full border border-zinc-800/80" style={{ backgroundColor: color.hex }} title={color.name} />
+                        <span className="text-[8px] text-zinc-600 text-center leading-tight max-w-[36px] truncate">{color.name}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+              ) : null}
 
-      {/* ── Thinking spinner ── */}
-      {isSearching && isThinking && (
-        <div className="relative z-20 flex flex-col items-center justify-center h-[50vh] space-y-4 mt-20">
-          <div className="w-10 h-10 sm:w-8 sm:h-8 border-2 border-white/10 border-t-white rounded-full animate-spin" />
-          <p className="text-zinc-500 font-mono text-xs sm:text-[10px] uppercase tracking-widest">{aiStatus}</p>
-        </div>
-      )}
+              {/* Clarification chips — shown as quick-reply options */}
+              {!isThinking && aiContext?.needs_clarification ? (
+                <div className="ml-8 flex flex-wrap gap-2 animate-in fade-in duration-500" style={{ animationDelay: '400ms', animationFillMode: 'both' }}>
+                  {['Smart Casual', 'Formal / Work', 'Weekend Casual', 'Night Out', 'Summer Look'].map((chip) => (
+                    <button
+                      key={chip}
+                      onClick={() => handleChipTap(chip)}
+                      className="px-3 py-1.5 rounded-full border border-zinc-700 text-zinc-300 text-[11px] hover:border-white hover:text-white hover:bg-zinc-900/60 transition-all duration-200 active:scale-95"
+                    >
+                      {chip}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
 
-      {/* ── Search Bar (fixed bottom) ── */}
-      <div className="fixed bottom-0 left-0 right-0 bg-gradient-to-t from-black via-black to-transparent pt-10 pb-6 sm:pb-8 px-4 z-40">
-        <div className="relative max-w-md mx-auto">
-          <GlitchPlaceholder active={searchQuery.length > 0} />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-zinc-900 border border-zinc-800 text-white text-base sm:text-sm rounded-3xl py-4 sm:py-4 px-6 outline-none focus:ring-2 focus:ring-white/30 focus:border-white/40 transition-all duration-500 min-h-[56px] sm:min-h-0 placeholder-transparent text-center"
-            style={searchQuery ? { boxShadow: '0 0 30px rgba(255,255,255,0.07)' } : {}}
-            placeholder=" "
-          />
-          {isThinking && (
-            <div className="absolute right-6 sm:right-5 top-1/2 -translate-y-1/2">
-              <span className="flex h-2.5 w-2.5 sm:h-2 sm:w-2 relative">
-                <span className="animate-ping absolute h-full w-full rounded-full bg-white opacity-75" />
-                <span className="relative rounded-full h-2.5 w-2.5 sm:h-2 sm:w-2 bg-white" />
-              </span>
+              {/* Follow-up chips after a successful response */}
+              {!isThinking && !aiContext?.needs_clarification && chatHistory.length >= 2 && finalBanner && !generatingOutfit ? (
+                <div className="ml-8 flex flex-wrap gap-2 animate-in fade-in duration-500" style={{ animationDelay: '1000ms', animationFillMode: 'both' }}>
+                  {['More formal', 'More casual', 'Different colours', 'Summer version', 'Night out version'].map((chip) => (
+                    <button
+                      key={chip}
+                      onClick={() => handleChipTap(chip)}
+                      className="px-3 py-1.5 rounded-full border border-zinc-800 text-zinc-500 text-[11px] hover:border-zinc-600 hover:text-zinc-300 transition-all duration-200 active:scale-95"
+                    >
+                      {chip}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+
+              {/* Advice mode curate button */}
+              {!isThinking && aiContext?.mode === 'advice' && !generatingOutfit && !generatedOutfit ? (
+                <div className="ml-8 animate-in fade-in duration-700" style={{ animationDelay: '1200ms', animationFillMode: 'both' }}>
+                  {!curateTriggered ? (
+                    <button
+                      onClick={triggerCuration}
+                      className="px-5 py-2.5 rounded-full bg-white text-black text-[11px] font-bold uppercase tracking-[0.2em] hover:bg-zinc-200 transition-all duration-300 active:scale-95"
+                    >
+                      Yes, curate for me →
+                    </button>
+                  ) : (
+                    <p className="text-zinc-600 text-[10px] uppercase tracking-widest animate-pulse">Building your look...</p>
+                  )}
+                </div>
+              ) : null}
+
+              {/* Pending user bubble (chip tap or typed query — shown while AI thinks) */}
+              {pendingUserMessage ? (
+                <div className="flex justify-end">
+                  <div className="max-w-[78%] px-4 py-2.5 rounded-2xl rounded-br-sm bg-zinc-800 text-white text-[13px] leading-relaxed">
+                    {pendingUserMessage}
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Typing indicator */}
+              {isThinking ? (
+                <div className="flex items-end gap-2">
+                  <div className="w-11 h-11 flex items-center justify-center flex-shrink-0">
+                    <img src="/logo.png" alt="" className="w-9 h-9 object-contain" style={{ filter: 'invert(1)', opacity: 1 }} aria-hidden="true" />
+                  </div>
+                  <div className="px-4 py-3 rounded-2xl rounded-bl-sm bg-zinc-900/80 border border-zinc-800/60">
+                    <div className="flex gap-[5px] items-center" aria-label="Elephante is thinking">
+                      <span className="w-1.5 h-1.5 rounded-full bg-white/50 animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <span className="w-1.5 h-1.5 rounded-full bg-white/35 animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <span className="w-1.5 h-1.5 rounded-full bg-white/20 animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              <div ref={chatEndRef} />
             </div>
-          )}
-        </div>
+
+            {/* ── Outfit results ── */}
+            {aiContext?.mode !== 'advice' || generatingOutfit || generatedOutfit ? (
+              <>
+                {!isThinking && (filteredOutfits.length > 0 || generatingOutfit || generatedOutfit) ? (
+                  <div className="flex items-center gap-3 mb-5">
+                    <div className="h-px bg-zinc-900 flex-1" />
+                    <span className="text-zinc-700 text-[9px] uppercase tracking-widest">
+                      {generatingOutfit ? 'Creating your look...' : `${filteredOutfits.length} outfit${filteredOutfits.length !== 1 ? 's' : ''}`}
+                    </span>
+                    <div className="h-px bg-zinc-900 flex-1" />
+                  </div>
+                ) : null}
+
+                {!isThinking && aiContext?.mode !== 'advice' && filteredOutfits.length === 0 && !generatingOutfit && !generatedOutfit ? (
+                  <p className="text-zinc-700 text-[11px] text-center py-8 leading-relaxed">
+                    {searchQuery ? feedTranslations.en.emptySearch : feedTranslations.en.emptyFeed}
+                  </p>
+                ) : null}
+
+                <div className="grid grid-cols-2 gap-y-5 sm:gap-y-6 gap-x-3 sm:gap-x-4">
+                  {((filteredOutfits.length === 0 && generatingOutfit && aiContext?.mode !== 'advice') || (curateTriggered && generatingOutfit)) ? (
+                    <>
+                      {[0, 1].map((value) => (
+                        <div key={value} className="group">
+                          <div className="relative w-full aspect-[3/4] overflow-hidden rounded-xl sm:rounded-2xl skeleton" />
+                          <div className="mt-2 h-2 rounded-full skeleton w-2/3" />
+                        </div>
+                      ))}
+                    </>
+                  ) : null}
+
+                  {filteredOutfits.length === 0 && !generatingOutfit && generatedOutfit ? (
+                    <>
+                      <div className="group cursor-pointer" style={{ opacity: 0, animation: 'cardIn 0.45s ease forwards', animationDelay: '0ms' }} onClick={() => handleGeneratedTap('primary')}>
+                        <div className="relative w-full aspect-[3/4] overflow-hidden rounded-xl sm:rounded-2xl bg-zinc-900 transition-transform duration-300 group-hover:scale-[1.02] group-active:scale-[0.98]">
+                          {generatedOutfit.image_url ? (
+                            <GeneratedOutfitImage src={generatedOutfit.image_url} alt={generatedOutfit.outfit?.outfit_name || 'Generated outfit'} className="w-full h-full object-cover object-top opacity-75 group-hover:opacity-100 transition-opacity duration-400" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center"><span className="text-zinc-800 text-[9px] uppercase tracking-widest">No image</span></div>
+                          )}
+                          <span className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-black/60 text-[8px] uppercase tracking-widest text-zinc-400 border border-zinc-800/60">AI</span>
+                        </div>
+                        {generatedOutfit.outfit?.style || generatedOutfit.outfit?.outfit_name ? (
+                          <p className="mt-1.5 text-[9px] uppercase tracking-[0.2em] text-zinc-600 group-hover:text-zinc-400 truncate px-0.5 transition-colors duration-200">
+                            {generatedOutfit.outfit?.style || generatedOutfit.outfit?.outfit_name}
+                          </p>
+                        ) : null}
+                      </div>
+
+                      {generatedOutfit.outfit?.alternative ? (
+                        <div className="group cursor-pointer" style={{ opacity: 0, animation: 'cardIn 0.45s ease forwards', animationDelay: '80ms' }} onClick={() => handleGeneratedTap('alternative')}>
+                          <div className="relative w-full aspect-[3/4] overflow-hidden rounded-xl sm:rounded-2xl bg-zinc-900 transition-transform duration-300 group-hover:scale-[1.02] group-active:scale-[0.98]">
+                            {generatedOutfit.alternative_image_url ? (
+                              <GeneratedOutfitImage src={generatedOutfit.alternative_image_url} alt={generatedOutfit.outfit.alternative?.outfit_name || 'Suggested outfit'} className="w-full h-full object-cover opacity-75 group-hover:opacity-100 transition-opacity duration-400" />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center"><span className="text-zinc-800 text-[9px] uppercase tracking-widest">No image</span></div>
+                            )}
+                            <span className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-black/60 text-[8px] uppercase tracking-widest text-zinc-400 border border-zinc-800/60">Alt</span>
+                          </div>
+                          {generatedOutfit.outfit.alternative?.style || generatedOutfit.outfit.alternative?.outfit_name ? (
+                            <p className="mt-1.5 text-[9px] uppercase tracking-[0.2em] text-zinc-600 group-hover:text-zinc-400 truncate px-0.5 transition-colors duration-200">
+                              {generatedOutfit.outfit.alternative?.style || generatedOutfit.outfit.alternative?.outfit_name}
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </>
+                  ) : null}
+
+                  {filteredOutfits.map((outfit, index) => {
+                    const isBoosted = boostedIds.includes(String(outfit.id))
+                    const aiReason = aiContext?.suggestions?.find((suggestion) => String(suggestion.outfit_id) === String(outfit.id))?.reason
+                    const tag = outfit.style || outfit.aesthetic?.replace(/^(male|female)\s+/i, '') || 'Outfit'
+
+                    return (
+                      <div
+                        key={`${outfit.id}-${index}`}
+                        className="group cursor-pointer"
+                        style={{ opacity: 0, animation: 'cardIn 0.45s ease forwards', animationDelay: `${Math.min(index * 40, 400)}ms` }}
+                        onClick={() => {
+                          if (aiContext?.intent) saveSearchClick(aiContext.intent, [], String(outfit.id))
+                          saveFeedState()
+                          router.push(`/outfit/${outfit.id}`)
+                        }}
+                      >
+                        <div className="relative w-full aspect-[3/4] overflow-hidden rounded-xl sm:rounded-2xl bg-zinc-900 transition-transform duration-300 group-hover:scale-[1.02] group-active:scale-[0.97]">
+                          <OutfitCardImage outfit={outfit} alt={tag} />
+                          {isBoosted ? (
+                            <div className="absolute top-2 left-2 w-1.5 h-1.5 rounded-full bg-white/70 shadow-[0_0_6px_rgba(255,255,255,0.5)]" />
+                          ) : null}
+                        </div>
+                        {aiReason ? (
+                          <p className="mt-1.5 text-[10px] text-zinc-500 group-hover:text-zinc-400 leading-snug px-0.5 line-clamp-2 transition-colors duration-200">{aiReason}</p>
+                        ) : (
+                          <p className="mt-1.5 text-[9px] uppercase tracking-[0.2em] text-zinc-700 group-hover:text-zinc-500 truncate px-0.5 transition-colors duration-200">{tag}</p>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
+      <SearchFooter
+        attachment={attachment}
+        clearAttachment={clearAttachment}
+        confirmAttachment={confirmAttachment}
+        fileInputRef={fileInputRef}
+        handleAttachment={handleAttachment}
+        inputValue={inputValue}
+        isThinking={isThinking}
+        keyboardOffset={kbOffset}
+        onInputChange={(value) => {
+          setInputValue(value)
+          if (value === '') {
+            setSearchQuery('')
+            setPendingUserMessage('')
+            setChipDisplayMap({})
+            clearActiveSearchState()
+          }
+        }}
+        onSubmit={() => {
+          const q = inputValue.trim()
+          if (!q) return
+          setPendingUserMessage(q)
+          setSearchQuery(q)
+          setInputValue('')
+        }}
+        onTagChange={updateTag}
+        placeholderOverlay={<GlitchPlaceholder active={inputValue.length > 0} />}
+      />
     </div>
   )
 }
 
 export default function Feed() {
   return (
-    <Suspense fallback={
-      <div className="min-h-screen bg-black flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-white/10 border-t-white rounded-full animate-spin" />
-      </div>
-    }>
+    <Suspense fallback={<div className="min-h-screen bg-black flex items-center justify-center"><LoadingSpinner text="Loading Feed..." /></div>}>
       <FeedContent />
     </Suspense>
   )

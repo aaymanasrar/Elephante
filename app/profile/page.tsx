@@ -1,82 +1,163 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import LoadingScreen from '@/app/components/LoadingScreen'
+import ParticleCanvas from '@/components/ParticleCanvas'
 
-// ─── Particle Canvas ──────────────────────────────────────────────────────────
-function ParticleCanvas() {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+// ─── Edit Sheet ───────────────────────────────────────────────────────────────
+type EditField = 'username' | 'email' | 'password' | null
 
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
+function EditSheet({
+  field, currentValue, onClose, onSaved,
+}: {
+  field: EditField
+  currentValue: string
+  onClose: () => void
+  onSaved: (field: EditField, newValue: string) => void
+}) {
+  const [value, setValue]     = useState('')
+  const [confirm, setConfirm] = useState('')   // for password
+  const [saving, setSaving]   = useState(false)
+  const [error, setError]     = useState('')
+  const [done, setDone]       = useState(false)
 
-    let animId: number
-    let W = 0, H = 0
+  if (!field) return null
 
-    interface Particle { x: number; y: number; vx: number; vy: number; r: number; alpha: number }
-    const COUNT = 55
-    let particles: Particle[] = []
+  const LABELS: Record<NonNullable<EditField>, string> = {
+    username: 'New Username',
+    email:    'New Email Address',
+    password: 'New Password',
+  }
 
-    const resize = () => { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight }
-    const init   = () => {
-      particles = Array.from({ length: COUNT }, () => ({
-        x: Math.random() * W, y: Math.random() * H,
-        vx: (Math.random() - 0.5) * 0.35, vy: (Math.random() - 0.5) * 0.35,
-        r: Math.random() * 1.4 + 0.4, alpha: Math.random() * 0.45 + 0.1,
-      }))
-    }
+  const handleSave = async () => {
+    setError('')
+    const v = value.trim()
+    if (!v) { setError('Field cannot be empty.'); return }
+    if (field === 'password' && v !== confirm) { setError('Passwords do not match.'); return }
+    if (field === 'password' && v.length < 6)  { setError('Password must be at least 6 characters.'); return }
 
-    const draw = () => {
-      ctx.clearRect(0, 0, W, H)
-      const grd = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, W * 0.55)
-      grd.addColorStop(0, 'rgba(255,255,255,0.025)'); grd.addColorStop(1, 'rgba(0,0,0,0)')
-      ctx.fillStyle = grd; ctx.fillRect(0, 0, W, H)
-
-      for (let i = 0; i < COUNT; i++) {
-        for (let j = i + 1; j < COUNT; j++) {
-          const dx = particles[i].x - particles[j].x, dy = particles[i].y - particles[j].y
-          const dist = Math.sqrt(dx * dx + dy * dy)
-          if (dist < 140) {
-            ctx.beginPath()
-            ctx.strokeStyle = `rgba(255,255,255,${0.055 * (1 - dist / 140)})`
-            ctx.lineWidth = 0.5
-            ctx.moveTo(particles[i].x, particles[i].y); ctx.lineTo(particles[j].x, particles[j].y)
-            ctx.stroke()
-          }
-        }
+    setSaving(true)
+    try {
+      if (field === 'username') {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) throw new Error('Not authenticated')
+        const { error: dbErr } = await supabase.from('profiles').update({
+          username: v, full_name: v,
+        }).eq('id', user.id)
+        if (dbErr) throw dbErr
+      } else if (field === 'email') {
+        const { error: authErr } = await supabase.auth.updateUser({ email: v })
+        if (authErr) throw authErr
+      } else if (field === 'password') {
+        const { error: authErr } = await supabase.auth.updateUser({ password: v })
+        if (authErr) throw authErr
       }
-
-      for (const p of particles) {
-        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2)
-        ctx.fillStyle = `rgba(255,255,255,${p.alpha})`; ctx.fill()
-        p.x += p.vx; p.y += p.vy
-        if (p.x < 0) p.x = W; if (p.x > W) p.x = 0
-        if (p.y < 0) p.y = H; if (p.y > H) p.y = 0
-      }
-      animId = requestAnimationFrame(draw)
+      setDone(true)
+      onSaved(field, v)
+    } catch (e: any) {
+      setError(e?.message || 'Something went wrong. Try again.')
+    } finally {
+      setSaving(false)
     }
+  }
 
-    resize(); init(); draw()
-    const onResize = () => { resize(); init() }
-    window.addEventListener('resize', onResize)
-    return () => { cancelAnimationFrame(animId); window.removeEventListener('resize', onResize) }
-  }, [])
+  return (
+    /* Backdrop */
+    <div
+      className="fixed inset-0 z-[100] flex items-end justify-center"
+      style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+    >
+      {/* Sheet */}
+      <div className="w-full max-w-sm bg-zinc-950 border border-zinc-800 rounded-t-3xl px-6 pt-6 pb-10 animate-in slide-in-from-bottom-4 duration-300">
+        {/* Handle */}
+        <div className="w-10 h-1 bg-zinc-800 rounded-full mx-auto mb-6" />
 
-  return <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none z-0" />
+        <p className="text-[9px] uppercase tracking-[0.3em] text-zinc-600 mb-1">
+          {field === 'username' ? 'Account' : field === 'email' ? 'Account' : 'Security'}
+        </p>
+        <h2 className="text-white text-base font-light mb-6">
+          Change {field.charAt(0).toUpperCase() + field.slice(1)}
+        </h2>
+
+        {done ? (
+          <div className="space-y-4">
+            <p className="text-zinc-400 text-sm leading-relaxed">
+              {field === 'email'
+                ? 'Check your new email address to confirm the change.'
+                : `Your ${field} has been updated.`}
+            </p>
+            <button
+              onClick={onClose}
+              className="w-full h-12 bg-white text-black rounded-full text-[10px] font-bold uppercase tracking-widest hover:bg-zinc-100 transition-colors"
+            >
+              Done
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {field !== 'password' && (
+              <p className="text-zinc-700 text-[11px] mb-1">
+                Current: <span className="text-zinc-500">{currentValue}</span>
+              </p>
+            )}
+
+            <input
+              type={field === 'password' ? 'password' : field === 'email' ? 'email' : 'text'}
+              placeholder={LABELS[field]}
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              autoFocus
+              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3.5 text-sm text-white placeholder-zinc-700 focus:outline-none focus:border-white/40 focus:ring-1 focus:ring-white/20 transition-all"
+            />
+
+            {field === 'password' && (
+              <input
+                type="password"
+                placeholder="Confirm new password"
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3.5 text-sm text-white placeholder-zinc-700 focus:outline-none focus:border-white/40 focus:ring-1 focus:ring-white/20 transition-all"
+              />
+            )}
+
+            {error && (
+              <p className="text-red-400 text-[11px]">{error}</p>
+            )}
+
+            <div className="flex gap-3 pt-1">
+              <button
+                onClick={onClose}
+                className="flex-1 h-12 border border-zinc-800 text-zinc-500 rounded-full text-[10px] font-bold uppercase tracking-widest hover:border-zinc-600 hover:text-white transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="flex-1 h-12 bg-white text-black rounded-full text-[10px] font-bold uppercase tracking-widest hover:bg-zinc-100 transition-colors disabled:opacity-40"
+              >
+                {saving ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
 }
 
 // ─── Profile ──────────────────────────────────────────────────────────────────
 export default function ProfileDashboard() {
   const router = useRouter()
-  const [loading, setLoading]     = useState(true)
-  const [userEmail, setUserEmail] = useState('')
-  const [username, setUsername]   = useState('Style Icon')
-  const [styleBio, setStyleBio]   = useState('')
+  const [loading, setLoading]       = useState(true)
+  const [userEmail, setUserEmail]   = useState('')
+  const [username, setUsername]     = useState('Style Icon')
   const [savedCount, setSavedCount] = useState(0)
+  const [editField, setEditField]       = useState<EditField>(null)
+  const [showAccountMenu, setShowAccountMenu] = useState(false)
 
   useEffect(() => {
     const fetchData = async () => {
@@ -87,14 +168,16 @@ export default function ProfileDashboard() {
 
       const { data: profile } = await supabase
         .from('profiles')
-        .select('style_bio, id')
+        .select('id, full_name, username')
         .eq('id', user.id)
         .single()
 
-      if (profile) setStyleBio(profile.style_bio || 'I want to dress effortlessly chic and modern.')
+      if (profile) {
+        setUsername(profile.full_name || profile.username || user.email?.split('@')[0] || 'Style Icon')
+      }
 
       const { count } = await supabase
-        .from('saved_items')
+        .from('saved_outfits')
         .select('*', { count: 'exact', head: true })
         .eq('user_id', user.id)
 
@@ -104,18 +187,15 @@ export default function ProfileDashboard() {
     fetchData()
   }, [router])
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-black flex flex-col items-center justify-center space-y-4">
-        <ParticleCanvas />
-        <div className="relative z-10 w-8 h-8 border-2 border-white/10 border-t-white rounded-full animate-spin" />
-        <p className="relative z-10 text-zinc-600 text-[10px] uppercase tracking-widest">Loading...</p>
-      </div>
-    )
+  const handleSaved = (field: EditField, newValue: string) => {
+    if (field === 'username') setUsername(newValue)
+    if (field === 'email')    setUserEmail(newValue)
   }
 
+  if (loading) return <LoadingScreen />
+
   return (
-    <div className="min-h-screen bg-black text-white relative overflow-hidden">
+    <div className="min-h-[100dvh] bg-black text-white relative">
       <ParticleCanvas />
 
       {/* ── Back button ── */}
@@ -129,11 +209,11 @@ export default function ProfileDashboard() {
       </div>
 
       {/* ── Content ── */}
-      <div className="relative z-10 min-h-screen flex flex-col items-center justify-center px-5 py-20">
+      <div className="relative z-10 min-h-[100dvh] flex flex-col items-center justify-center px-5 py-20 overflow-y-auto">
         <div className="w-full max-w-sm flex flex-col items-center">
 
           {/* Avatar */}
-          <div className="w-20 h-20 sm:w-24 sm:h-24 bg-zinc-900 border border-zinc-800 rounded-full flex items-center justify-center text-2xl mb-5 shadow-[0_0_24px_rgba(255,255,255,0.04)]">
+          <div className="w-20 h-20 sm:w-24 sm:h-24 bg-zinc-900 border border-zinc-800 rounded-full flex items-center justify-center mb-5 shadow-[0_0_24px_rgba(255,255,255,0.04)]">
             <span className="text-zinc-300 text-2xl font-light">
               {userEmail.charAt(0).toUpperCase()}
             </span>
@@ -148,36 +228,147 @@ export default function ProfileDashboard() {
               <div className="text-2xl font-bold text-white mb-1">{savedCount}</div>
               <div className="text-[9px] uppercase tracking-widest text-zinc-600">Saved Items</div>
             </div>
-            <div className="bg-zinc-900/50 border border-zinc-800 p-5 rounded-2xl text-center flex flex-col items-center justify-center">
-              <span className="text-2xl mb-1">🔥</span>
-              <div className="text-[9px] uppercase tracking-widest text-zinc-600">Streak</div>
-            </div>
+            <button
+              onClick={() => setShowAccountMenu(true)}
+              className="bg-zinc-900/50 border border-zinc-800 p-5 rounded-2xl flex flex-col items-center justify-center gap-2 hover:border-zinc-600 hover:bg-zinc-900 transition-all duration-200 active:scale-95"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-400">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+              </svg>
+              <div className="text-[9px] uppercase tracking-widest text-zinc-600">Account</div>
+            </button>
           </div>
 
-          {/* Style note */}
-          <div className="w-full bg-zinc-900/30 border border-zinc-800/60 p-5 rounded-2xl mb-8">
-            <h3 className="text-[9px] uppercase tracking-widest text-zinc-600 mb-3">My Style Goal</h3>
-            <p className="text-sm text-zinc-400 leading-relaxed italic">"{styleBio}"</p>
-          </div>
+          {/* Outfit Builder */}
+          <button
+            onClick={() => router.push('/outfit-builder')}
+            className="group w-full rounded-2xl border border-zinc-800/60 overflow-hidden mb-8 relative hover:border-zinc-700 transition-all duration-300 text-left"
+          >
+            <div className="w-full flex items-center justify-center py-8 bg-zinc-950 select-none transition-all duration-500 group-hover:bg-zinc-900/60">
+              <svg width="90" height="160" viewBox="0 0 90 160" fill="none" xmlns="http://www.w3.org/2000/svg" className="transition-transform duration-500 group-hover:scale-105">
+                <ellipse cx="45" cy="16" rx="13" ry="15" fill="#3f3f46"/>
+                <rect x="40" y="29" width="10" height="10" rx="2" fill="#3f3f46"/>
+                <path d="M10 48 Q45 35 80 48 L80 95 Q45 105 10 95 Z" fill="#3f3f46"/>
+                <rect x="28" y="95" width="34" height="35" rx="4" fill="#3f3f46"/>
+                <path d="M20 130 Q45 122 70 130 L66 155 Q45 160 24 155 Z" fill="#3f3f46"/>
+                <rect x="43" y="155" width="4" height="5" fill="#3f3f46"/>
+                <ellipse cx="45" cy="160" rx="18" ry="4" fill="#3f3f46"/>
+              </svg>
+            </div>
+            <div className="absolute inset-0 flex flex-col items-center justify-center px-5 text-center">
+              <span className="text-[9px] uppercase tracking-[0.3em] text-zinc-500 mb-2 group-hover:text-zinc-400 transition-colors">Build an Outfit</span>
+              <p className="text-white text-sm font-light leading-snug mb-1">Outfit Builder</p>
+              <p className="text-zinc-500 text-[11px] leading-relaxed max-w-[200px] group-hover:text-zinc-400 transition-colors">
+                Mix and match pieces around your wardrobe. Upload a photo or describe any item.
+              </p>
+              <span className="mt-3 text-[9px] uppercase tracking-[0.25em] text-zinc-700 group-hover:text-zinc-500 transition-colors">Tap to open →</span>
+            </div>
+          </button>
 
           {/* Actions */}
-          <div className="w-full space-y-3">
+          <div className="w-full space-y-3 mb-6">
+            <button
+              onClick={() => router.push('/ai-stylist')}
+              className="w-full py-3.5 bg-white text-black font-bold text-[10px] uppercase tracking-widest rounded-full hover:bg-zinc-200 transition-colors min-h-[52px]"
+            >
+              AI Stylist
+            </button>
             <button
               onClick={() => router.push('/profile/preferences')}
-              className="w-full py-3.5 bg-white text-black font-bold text-[10px] uppercase tracking-widest rounded-full hover:bg-zinc-200 transition-colors min-h-[52px]"
+              className="w-full py-3.5 border border-zinc-800 text-zinc-400 font-bold text-[10px] uppercase tracking-widest rounded-full hover:border-zinc-600 hover:text-white transition-colors min-h-[52px]"
             >
               Personal Preferences
             </button>
-            <button
-              onClick={async () => { await supabase.auth.signOut(); router.push('/login') }}
-              className="w-full py-3.5 border border-zinc-800 text-zinc-500 font-bold text-[10px] uppercase tracking-widest rounded-full hover:border-red-900/60 hover:text-red-500 transition-colors min-h-[52px]"
-            >
-              Sign Out
-            </button>
           </div>
+
+          <button
+            onClick={async () => { await supabase.auth.signOut(); router.push('/login') }}
+            className="w-full py-3.5 border border-zinc-900 text-zinc-600 font-bold text-[10px] uppercase tracking-widest rounded-full hover:border-red-900/60 hover:text-red-500 transition-colors min-h-[52px]"
+          >
+            Sign Out
+          </button>
 
         </div>
       </div>
+
+      {/* ── Account menu sheet ── */}
+      {showAccountMenu && !editField && (
+        <div
+          className="fixed inset-0 z-[100] flex items-end justify-center"
+          style={{
+            background: 'rgba(0,0,0,0)',
+            backdropFilter: 'blur(0px)',
+            animation: 'accountOverlayIn 0.35s ease forwards',
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowAccountMenu(false) }}
+        >
+          <div
+            className="w-full max-w-sm bg-zinc-950 border border-zinc-800/70 rounded-t-3xl px-6 pt-6 pb-10 shadow-2xl"
+            style={{ animation: 'accountSheetIn 0.4s cubic-bezier(0.34,1.56,0.64,1) forwards' }}
+          >
+            <div className="w-10 h-1 bg-zinc-800 rounded-full mx-auto mb-6" />
+            <p className="text-[9px] uppercase tracking-[0.3em] text-zinc-600 mb-5">Account Settings</p>
+            <div className="border border-zinc-900 rounded-2xl overflow-hidden">
+              {(
+                [
+                  { label: 'Change Username', sub: username,   field: 'username' as EditField },
+                  { label: 'Change Email',    sub: userEmail,  field: 'email'    as EditField },
+                  { label: 'Change Password', sub: '••••••••', field: 'password' as EditField },
+                ] as const
+              ).map(({ label, sub, field }, i, arr) => (
+                <button
+                  key={field}
+                  onClick={() => { setShowAccountMenu(false); setEditField(field) }}
+                  className={`w-full flex items-center justify-between px-4 py-4 text-left hover:bg-zinc-900/60 transition-colors ${
+                    i < arr.length - 1 ? 'border-b border-zinc-900' : ''
+                  }`}
+                  style={{ opacity: 0, animation: `accountItemIn 0.3s ease forwards ${i * 60 + 120}ms` }}
+                >
+                  <div>
+                    <p className="text-zinc-200 text-[13px]">{label}</p>
+                    <p className="text-zinc-600 text-[11px] mt-0.5 truncate max-w-[200px]">{sub}</p>
+                  </div>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="text-zinc-700 shrink-0">
+                    <path d="M9 18l6-6-6-6"/>
+                  </svg>
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setShowAccountMenu(false)}
+              className="w-full mt-4 h-11 border border-zinc-800 text-zinc-500 rounded-full text-[10px] font-bold uppercase tracking-widest hover:border-zinc-600 hover:text-white transition-colors"
+              style={{ opacity: 0, animation: 'accountItemIn 0.3s ease forwards 300ms' }}
+            >
+              Cancel
+            </button>
+          </div>
+
+          <style jsx>{`
+            @keyframes accountOverlayIn {
+              to { background: rgba(0,0,0,0.75); backdrop-filter: blur(6px); }
+            }
+            @keyframes accountSheetIn {
+              from { transform: translateY(100%) scale(0.97); opacity: 0; }
+              to   { transform: translateY(0) scale(1); opacity: 1; }
+            }
+            @keyframes accountItemIn {
+              from { opacity: 0; transform: translateY(8px); }
+              to   { opacity: 1; transform: translateY(0); }
+            }
+          `}</style>
+        </div>
+      )}
+
+      {/* ── Edit sheet ── */}
+      {editField && (
+        <EditSheet
+          field={editField}
+          currentValue={editField === 'email' ? userEmail : editField === 'username' ? username : ''}
+          onClose={() => setEditField(null)}
+          onSaved={(f, v) => { handleSaved(f, v); setEditField(null) }}
+        />
+      )}
     </div>
   )
 }

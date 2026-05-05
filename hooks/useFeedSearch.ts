@@ -26,6 +26,7 @@ interface FeedSearchParams {
   userHeight: string
   userSkinTone: string
   userStylePref: string
+  language?: 'en' | 'ar'
 }
 
 export function useFeedSearch({
@@ -44,6 +45,7 @@ export function useFeedSearch({
   userHeight,
   userSkinTone,
   userStylePref,
+  language = 'en',
 }: FeedSearchParams) {
   const [searchQuery, setSearchQueryState] = useState(initialQuery)
   const [inputValue, setInputValue] = useState(initialQuery)
@@ -78,6 +80,7 @@ export function useFeedSearch({
     userHeight,
     userSkinTone,
     userStylePref,
+    language,
   })
   const setSearchQuery = (value: string) => {
     if (value !== searchQuery) setCurateTriggered(false)

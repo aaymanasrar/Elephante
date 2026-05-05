@@ -10,6 +10,8 @@ import { filterOutfits, matchesAesthetic } from '@/lib/filterOutfits'
 import { useRequireUser } from '@/hooks/useRequireUser'
 import { getFriendlyDataError } from '@/lib/supabaseErrors'
 import { canUseNextImage } from '@/lib/image'
+import { useLocale } from '@/lib/locale-context'
+import { useArabicTranslations } from '@/hooks/useArabicTranslations'
 import type { Outfit } from '@/types/outfit'
 import type { Profile } from '@/types/profile'
 
@@ -24,6 +26,43 @@ const AESTHETICS = [
   { id: 'pastel', label: 'Pastel' },
   { id: 'colorful', label: 'Vibrant' },
 ]
+
+const closetCopy = {
+  en: {
+    back: 'Back',
+    closet: 'Closet',
+    style: 'Style',
+    color: 'Color',
+    search: 'Search — wedding, office, white shirt, suit...',
+    clearSearch: 'Clear search',
+    loading: 'Loading Closet...',
+    emptySearch: 'No matching looks',
+    emptySaved: 'No saved outfits',
+    filtered: 'filtered',
+    sorted: 'sorted by your aesthetic',
+    savedLook: 'Saved Look',
+    aiLook: 'AI Look',
+    noImage: 'No image',
+    loadError: 'We could not load your closet.',
+  },
+  ar: {
+    back: 'رجوع',
+    closet: 'الخزانة',
+    style: 'النمط',
+    color: 'اللون',
+    search: 'ابحث — زفاف، مكتب، قميص أبيض، بدلة...',
+    clearSearch: 'مسح البحث',
+    loading: 'جارٍ تحميل الخزانة...',
+    emptySearch: 'لا توجد إطلالات مطابقة',
+    emptySaved: 'لا توجد إطلالات محفوظة',
+    filtered: 'مصفاة',
+    sorted: 'مرتبة حسب ذوقك',
+    savedLook: 'إطلالة محفوظة',
+    aiLook: 'إطلالة ذكية',
+    noImage: 'لا توجد صورة',
+    loadError: 'لم نتمكن من تحميل الخزانة.',
+  },
+} as const
 
 type SavedOutfitRow = {
   outfit_id?: string | number | null
@@ -59,6 +98,8 @@ function ClosetImage({ outfit, label }: { outfit: Outfit; label: string }) {
 
 export default function ClosetPage() {
   const router = useRouter()
+  const { isAr } = useLocale()
+  const t = isAr ? closetCopy.ar : closetCopy.en
   const { user, loading: userLoading, error: authError } = useRequireUser('/login')
   const [allOutfits, setAllOutfits] = useState<Outfit[]>([])
   const [displayed, setDisplayed] = useState<Outfit[]>([])
@@ -85,7 +126,7 @@ export default function ClosetPage() {
           .single()
 
         if (profileError) {
-          setError(getFriendlyDataError(profileError.message, 'We could not load your closet.'))
+          setError(getFriendlyDataError(profileError.message, t.loadError))
         }
 
         const profile = profileData as Pick<Profile, 'preferred_palette'> | null
@@ -100,7 +141,7 @@ export default function ClosetPage() {
           .eq('user_id', user.id)
 
         if (savedError) {
-          setError(getFriendlyDataError(savedError.message, 'We could not load your closet.'))
+          setError(getFriendlyDataError(savedError.message, t.loadError))
           setAllOutfits([])
           return
         }
@@ -187,14 +228,29 @@ export default function ClosetPage() {
 
         setAllOutfits(allSaved)
       } catch {
-        setError('We could not load your closet.')
+        setError(t.loadError)
       } finally {
         setLoading(false)
       }
     }
 
     loadData()
-  }, [user])
+  }, [user, t.loadError])
+
+  const translateTexts = displayed.flatMap((outfit) => [
+    outfit.style_category,
+    outfit.outfit_name,
+    outfit.style,
+    outfit.aesthetic,
+    outfit.top_wear,
+    outfit.bottom_wear,
+    outfit.shoes,
+  ])
+  const tr = useArabicTranslations([
+    ...LIFESTYLE.map((item) => item.label),
+    ...AESTHETICS.map((item) => item.label),
+    ...translateTexts,
+  ], isAr)
 
   useEffect(() => {
     setDisplayed(filterOutfits({
@@ -222,46 +278,46 @@ export default function ClosetPage() {
   const pillOff = 'bg-transparent text-zinc-500 border-zinc-800 hover:border-zinc-600 hover:text-zinc-300'
 
   return (
-    <div className="min-h-screen bg-black text-white relative overflow-hidden">
+    <div className="min-h-screen bg-black text-white relative overflow-hidden" dir={isAr ? 'rtl' : 'ltr'}>
       <ParticleCanvas />
 
       <div className="relative z-20 flex items-center justify-between px-5 pt-8 sm:pt-10 pb-3">
         <button
           onClick={() => router.back()}
           className="text-zinc-600 text-[10px] uppercase tracking-[0.3em] hover:text-white transition-colors min-h-[44px] flex items-center"
-          aria-label="Go back"
+          aria-label={t.back}
         >
-          ← Back
+          {isAr ? `${t.back} →` : `← ${t.back}`}
         </button>
         <h1 className="absolute left-1/2 -translate-x-1/2 text-[11px] font-bold tracking-[0.4em] text-zinc-500 uppercase">
-          Closet
+          {t.closet}
         </h1>
         <div className="w-10" />
       </div>
 
       <div className="relative z-20 px-4 space-y-2 pb-3">
         <div className="flex gap-2 overflow-x-auto pb-0.5 scrollbar-hide">
-          <span className="flex-shrink-0 text-[9px] uppercase tracking-widest text-zinc-700 self-center pr-1">Style</span>
+          <span className="flex-shrink-0 text-[9px] uppercase tracking-widest text-zinc-700 self-center pr-1">{t.style}</span>
           {LIFESTYLE.map((lifestyle) => (
             <button
               key={lifestyle.id}
               onClick={() => setActiveLifestyles((previous) => previous.includes(lifestyle.id) ? previous.filter((value) => value !== lifestyle.id) : [...previous, lifestyle.id])}
               className={`${pillBase} ${activeLifestyles.includes(lifestyle.id) ? pillOn : pillOff}`}
             >
-              {lifestyle.label}
+              {tr(lifestyle.label)}
             </button>
           ))}
         </div>
 
         <div className="flex gap-2 overflow-x-auto pb-0.5 scrollbar-hide">
-          <span className="flex-shrink-0 text-[9px] uppercase tracking-widest text-zinc-700 self-center pr-1">Color</span>
+          <span className="flex-shrink-0 text-[9px] uppercase tracking-widest text-zinc-700 self-center pr-1">{t.color}</span>
           {AESTHETICS.map((aesthetic) => (
             <button
               key={aesthetic.id}
               onClick={() => setActiveAesthetics((previous) => previous.includes(aesthetic.id) ? previous.filter((value) => value !== aesthetic.id) : [...previous, aesthetic.id])}
               className={`${pillBase} ${activeAesthetics.includes(aesthetic.id) ? pillOn : pillOff}`}
             >
-              {aesthetic.label}
+              {tr(aesthetic.label)}
               {userPalette.includes(aesthetic.id) ? <span className="ml-1.5 w-1.5 h-1.5 rounded-full bg-zinc-400 inline-block" /> : null}
             </button>
           ))}
@@ -274,9 +330,10 @@ export default function ClosetPage() {
             type="text"
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Search — wedding, office, white shirt, suit..."
+            placeholder={t.search}
             aria-label="Search saved outfits"
-            className="w-full bg-zinc-900/80 border border-zinc-800 text-white placeholder-zinc-700 text-sm rounded-2xl py-3 pl-5 pr-10 outline-none focus:border-white/30 focus:ring-1 focus:ring-white/20 transition-all"
+            className={`w-full bg-zinc-900/80 border border-zinc-800 text-white placeholder-zinc-700 text-sm rounded-2xl py-3 outline-none focus:border-white/30 focus:ring-1 focus:ring-white/20 transition-all ${isAr ? 'pr-5 pl-10 text-right' : 'pl-5 pr-10'}`}
+            dir={isAr ? 'rtl' : 'ltr'}
           />
           {isSearching ? (
             <div className="absolute right-4 top-1/2 -translate-y-1/2">
@@ -287,7 +344,7 @@ export default function ClosetPage() {
             <button
               onClick={() => setSearchQuery('')}
               className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-white transition-colors"
-              aria-label="Clear search"
+              aria-label={t.clearSearch}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <line x1="18" y1="6" x2="6" y2="18" />
@@ -301,7 +358,7 @@ export default function ClosetPage() {
       <div className="relative z-10 px-4 pb-32">
         {loading || userLoading ? (
           <div className="py-32">
-            <LoadingSpinner text="Loading Closet..." />
+            <LoadingSpinner text={t.loading} />
           </div>
         ) : error || authError ? (
           <div className="flex flex-col items-center justify-center py-32">
@@ -310,19 +367,19 @@ export default function ClosetPage() {
         ) : displayed.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-32">
             <p className="text-zinc-800 text-[10px] uppercase tracking-[0.4em]">
-              {searchQuery ? 'No matching looks' : 'No saved outfits'}
+              {searchQuery ? t.emptySearch : t.emptySaved}
             </p>
           </div>
         ) : (
           <>
             <p className="text-zinc-700 text-[9px] uppercase tracking-widest mb-4">
-              {displayed.length} look{displayed.length !== 1 ? 's' : ''}
-              {(activeLifestyles.length > 0 || activeAesthetics.length > 0) ? ' · filtered' : ''}
-              {userPalette.length > 0 && activeAesthetics.length === 0 ? ' · sorted by your aesthetic' : ''}
+              {displayed.length} {isAr ? 'إطلالة' : `look${displayed.length !== 1 ? 's' : ''}`}
+              {(activeLifestyles.length > 0 || activeAesthetics.length > 0) ? ` · ${t.filtered}` : ''}
+              {userPalette.length > 0 && activeAesthetics.length === 0 ? ` · ${t.sorted}` : ''}
             </p>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
               {displayed.map((outfit, index) => {
-                const label = outfit.style_category || outfit.outfit_name || outfit.style || 'Outfit'
+                const label = outfit.style_category || outfit.outfit_name || outfit.style || (isAr ? 'إطلالة' : 'Outfit')
                 const hexes = Array.isArray(outfit.hex_colors)
                   ? outfit.hex_colors
                   : Array.isArray(outfit.key_colors)
@@ -342,7 +399,7 @@ export default function ClosetPage() {
                         <>
                           <ClosetImage outfit={outfit} label={label} />
                           <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-black/90 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                            <p className="text-[9px] uppercase tracking-widest text-zinc-300 truncate">{label}</p>
+                            <p className="text-[9px] uppercase tracking-widest text-zinc-300 truncate">{tr(label)}</p>
                           </div>
                         </>
                       ) : hasData ? (
@@ -355,18 +412,18 @@ export default function ClosetPage() {
                             </div>
                           ) : null}
                           <div className="flex-1 flex flex-col justify-center gap-1.5 py-2">
-                            <p className="text-[10px] text-white font-light leading-tight line-clamp-2">{label}</p>
+                            <p className="text-[10px] text-white font-light leading-tight line-clamp-2">{tr(label)}</p>
                             {pieces.map((piece, pieceIndex) => (
-                              <p key={`${piece}-${pieceIndex}`} className="text-[9px] text-zinc-600 leading-snug truncate">{piece}</p>
+                              <p key={`${piece}-${pieceIndex}`} className="text-[9px] text-zinc-600 leading-snug truncate">{tr(String(piece))}</p>
                             ))}
                           </div>
                           <p className="text-[8px] uppercase tracking-[0.3em] text-zinc-800">
-                            {userPalette.some((palette) => matchesAesthetic(outfit, palette)) ? 'Saved Look' : 'AI Look'}
+                            {userPalette.some((palette) => matchesAesthetic(outfit, palette)) ? t.savedLook : t.aiLook}
                           </p>
                         </div>
                       ) : (
                         <div className="w-full h-full flex items-center justify-center text-zinc-800 text-[9px] uppercase tracking-widest">
-                          No image
+                          {t.noImage}
                         </div>
                       )}
                     </div>

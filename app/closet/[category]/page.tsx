@@ -5,14 +5,16 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import ParticleCanvas from '@/components/ParticleCanvas'
+import { useArabicTranslations } from '@/hooks/useArabicTranslations'
+import { useLocale } from '@/lib/locale-context'
 
 const CATEGORIES = [
-  { id: 'outerwear',   label: 'Outerwear'        },
-  { id: 'tops',        label: 'Tops & Shirts'     },
-  { id: 'trousers',    label: 'Trousers & Denim'  },
-  { id: 'footwear',    label: 'Footwear'          },
-  { id: 'accessories', label: 'Accessories'       },
-  { id: 'tailoring',   label: 'Suits & Tailoring' },
+  { id: 'outerwear',   label: 'Outerwear', labelAr: 'الملابس الخارجية' },
+  { id: 'tops',        label: 'Tops & Shirts', labelAr: 'القمصان والعلوي' },
+  { id: 'trousers',    label: 'Trousers & Denim', labelAr: 'البناطيل والدنيم' },
+  { id: 'footwear',    label: 'Footwear', labelAr: 'الأحذية' },
+  { id: 'accessories', label: 'Accessories', labelAr: 'الإكسسوارات' },
+  { id: 'tailoring',   label: 'Suits & Tailoring', labelAr: 'البدلات والتفصيل' },
 ]
 
 interface SavedItem {
@@ -26,11 +28,14 @@ interface SavedItem {
 export default function CategoryArchive() {
   const params     = useParams()
   const router     = useRouter()
+  const { isAr } = useLocale()
   const [items, setItems]     = useState<SavedItem[]>([])
   const [loading, setLoading] = useState(true)
 
   const categoryId = params?.category as string
-  const categoryLabel = CATEGORIES.find(c => c.id === categoryId)?.label || categoryId
+  const activeCategory = CATEGORIES.find(c => c.id === categoryId)
+  const categoryLabel = isAr ? activeCategory?.labelAr || categoryId : activeCategory?.label || categoryId
+  const translate = useArabicTranslations(items.map((item) => item.piece_name), isAr)
 
   const fetchSavedItems = useCallback(async () => {
     try {
@@ -63,7 +68,7 @@ export default function CategoryArchive() {
   }
 
   return (
-    <div className="min-h-screen bg-black text-white relative overflow-hidden">
+    <div className="min-h-screen bg-black text-white relative overflow-hidden" dir={isAr ? 'rtl' : 'ltr'}>
       <ParticleCanvas />
 
       {/* ── Header ── */}
@@ -72,7 +77,7 @@ export default function CategoryArchive() {
           onClick={() => router.push('/closet')}
           className="text-zinc-600 text-[10px] uppercase tracking-[0.3em] hover:text-white transition-colors min-h-[44px] flex items-center"
         >
-          ← Closet
+          {isAr ? 'الخزانة →' : '← Closet'}
         </button>
         <h1 className="absolute left-1/2 -translate-x-1/2 text-[11px] font-bold tracking-[0.4em] text-zinc-500 uppercase whitespace-nowrap">
           {categoryLabel}
@@ -93,7 +98,7 @@ export default function CategoryArchive() {
                   : 'bg-transparent text-zinc-500 border-zinc-800 hover:border-zinc-600 hover:text-zinc-300'
               }`}
             >
-              {cat.label}
+              {isAr ? cat.labelAr : cat.label}
             </Link>
           ))}
         </div>
@@ -104,11 +109,13 @@ export default function CategoryArchive() {
         {loading ? (
           <div className="flex flex-col items-center justify-center py-40 space-y-4">
             <div className="w-7 h-7 border-2 border-white/10 border-t-white rounded-full animate-spin" />
-            <p className="text-zinc-700 text-[10px] uppercase tracking-widest">Loading...</p>
+            <p className="text-zinc-700 text-[10px] uppercase tracking-widest">{isAr ? 'جارٍ التحميل...' : 'Loading...'}</p>
           </div>
         ) : items.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-40 border border-dashed border-zinc-900 rounded-2xl mx-2">
-            <p className="text-zinc-800 text-[10px] uppercase tracking-[0.4em]">Nothing in {categoryLabel}</p>
+            <p className="text-zinc-800 text-[10px] uppercase tracking-[0.4em]">
+              {isAr ? `لا توجد قطع في ${categoryLabel}` : `Nothing in ${categoryLabel}`}
+            </p>
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 sm:gap-4">
@@ -121,7 +128,8 @@ export default function CategoryArchive() {
                 {/* Delete button */}
                 <button
                   onClick={(e) => handleDelete(item.id, e)}
-                  className="absolute top-2.5 right-2.5 z-20 w-8 h-8 bg-black/60 backdrop-blur-md rounded-full flex items-center justify-center border border-white/10 opacity-0 group-hover:opacity-100 transition-all duration-300 hover:bg-red-500/80 hover:border-red-500"
+                    className={`absolute top-2.5 ${isAr ? 'left-2.5' : 'right-2.5'} z-20 w-8 h-8 bg-black/60 backdrop-blur-md rounded-full flex items-center justify-center border border-white/10 opacity-0 group-hover:opacity-100 transition-all duration-300 hover:bg-red-500/80 hover:border-red-500`}
+                    aria-label={isAr ? 'حذف القطعة' : 'Delete item'}
                 >
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
@@ -137,13 +145,13 @@ export default function CategoryArchive() {
                     />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-zinc-800 text-[9px] uppercase tracking-widest">
-                      No image
+                      {isAr ? 'لا توجد صورة' : 'No image'}
                     </div>
                   )}
                 </div>
 
                 <p className="mt-2 text-[10px] uppercase tracking-widest text-zinc-600 group-hover:text-zinc-300 transition-colors truncate">
-                  {item.piece_name}
+                  {translate(item.piece_name)}
                 </p>
               </div>
             ))}

@@ -2,27 +2,38 @@
 
 import { createContext, useContext, useEffect, useState } from 'react'
 
-type Lang = 'en' | 'ar'
+export type Lang = 'en' | 'ar'
 
 interface LocaleValue {
   lang: Lang
   isAr: boolean
+  setLang: (lang: Lang) => void
 }
 
-const LocaleContext = createContext<LocaleValue>({ lang: 'en', isAr: false })
+const LocaleContext = createContext<LocaleValue>({ lang: 'en', isAr: false, setLang: () => {} })
+
+const STORAGE_KEY = 'elephante_lang'
 
 export function LocaleProvider({ children }: { children: React.ReactNode }) {
   const [lang, setLang] = useState<Lang>('en')
 
   useEffect(() => {
-    const detected = navigator.language.toLowerCase().startsWith('ar') ? 'ar' : 'en'
-    setLang(detected)
-    document.documentElement.dir = detected === 'ar' ? 'rtl' : 'ltr'
-    document.documentElement.lang = detected
+    const stored = localStorage.getItem(STORAGE_KEY)
+    if (stored === 'ar' || stored === 'en') setLang(stored)
   }, [])
 
+  useEffect(() => {
+    document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr'
+    document.documentElement.lang = lang
+  }, [lang])
+
+  const updateLang = (nextLang: Lang) => {
+    setLang(nextLang)
+    localStorage.setItem(STORAGE_KEY, nextLang)
+  }
+
   return (
-    <LocaleContext.Provider value={{ lang, isAr: lang === 'ar' }}>
+    <LocaleContext.Provider value={{ lang, isAr: lang === 'ar', setLang: updateLang }}>
       {children}
     </LocaleContext.Provider>
   )

@@ -58,23 +58,14 @@ export default function Login() {
   const [error, setError]             = useState('')
   const [loading, setLoading]         = useState(false)
   const [lang, setLang]               = useState<'en' | 'ar'>('en')
-  const [touched, setTouched]         = useState(false)
-  const [formVisible, setFormVisible] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
+  const touched = true
+  const formVisible = true
 
   useEffect(() => {
-    const locale = (navigator.language || 'en').toLowerCase()
-    if (locale.startsWith('ar')) setLang('ar')
+    const stored = localStorage.getItem('elephante_lang')
+    if (stored === 'ar' || stored === 'en') setLang(stored)
   }, [])
-
-  useEffect(() => {
-    if (touched) {
-      const timer = setTimeout(() => setFormVisible(true), 300)
-      return () => clearTimeout(timer)
-    }
-    setFormVisible(false)
-    return undefined
-  }, [touched])
 
   const t    = T[lang]
   const isAr = lang === 'ar'
@@ -105,9 +96,7 @@ export default function Login() {
               relative flex flex-col items-center w-full
               transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]
               ${touched ? 'mb-10' : 'mb-0'}
-              ${!touched ? 'cursor-pointer select-none' : ''}
             `}
-            onClick={() => !touched && setTouched(true)}
           >
             {/* Breathing ambient glow — untouched only */}
             <div

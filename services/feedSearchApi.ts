@@ -10,6 +10,7 @@ interface OutfitSearchParams {
   userHeight: string
   userSkinTone: string
   userStylePref: string
+  language?: 'en' | 'ar'
 }
 
 interface OutfitGenerationParams {
@@ -19,6 +20,7 @@ interface OutfitGenerationParams {
   userHeight: string
   userSkinTone: string
   userStylePref: string
+  language?: 'en' | 'ar'
 }
 
 export async function requestOutfitSearch({
@@ -31,6 +33,7 @@ export async function requestOutfitSearch({
   userHeight,
   userSkinTone,
   userStylePref,
+  language,
 }: OutfitSearchParams, signal: AbortSignal) {
   const response = await fetch('/api/outfit-search', {
     method: 'POST',
@@ -46,6 +49,7 @@ export async function requestOutfitSearch({
       style_pref: userStylePref,
       history: chatHistory,
       outfits: serializedOutfits,
+      language,
     }),
   })
   if (!response.ok) throw new Error(`outfit-search failed (${response.status})`)
@@ -59,6 +63,7 @@ export async function requestOutfitGeneration({
   userHeight,
   userSkinTone,
   userStylePref,
+  language,
 }: OutfitGenerationParams, signal: AbortSignal) {
   const response = await fetch('/api/outfit-generate', {
     method: 'POST',
@@ -71,6 +76,7 @@ export async function requestOutfitGeneration({
       body_shape: userBodyShape,
       height: userHeight,
       style_pref: userStylePref,
+      language,
     }),
   })
   if (!response.ok) throw new Error(`outfit-generate failed (${response.status})`)

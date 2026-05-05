@@ -5,15 +5,17 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import LoadingScreen from '@/app/components/LoadingScreen'
 import ParticleCanvas from '@/components/ParticleCanvas'
+import { useLocale } from '@/lib/locale-context'
 
 // ─── Edit Sheet ───────────────────────────────────────────────────────────────
 type EditField = 'username' | 'email' | 'password' | null
 
 function EditSheet({
-  field, currentValue, onClose, onSaved,
+  field, currentValue, isAr, onClose, onSaved,
 }: {
   field: EditField
   currentValue: string
+  isAr: boolean
   onClose: () => void
   onSaved: (field: EditField, newValue: string) => void
 }) {
@@ -25,18 +27,24 @@ function EditSheet({
 
   if (!field) return null
 
-  const LABELS: Record<NonNullable<EditField>, string> = {
-    username: 'New Username',
-    email:    'New Email Address',
-    password: 'New Password',
+  const labels: Record<NonNullable<EditField>, string> = {
+    username: isAr ? 'اسم المستخدم الجديد' : 'New Username',
+    email:    isAr ? 'البريد الإلكتروني الجديد' : 'New Email Address',
+    password: isAr ? 'كلمة المرور الجديدة' : 'New Password',
+  }
+
+  const fieldNames: Record<NonNullable<EditField>, string> = {
+    username: isAr ? 'اسم المستخدم' : 'Username',
+    email: isAr ? 'البريد الإلكتروني' : 'Email',
+    password: isAr ? 'كلمة المرور' : 'Password',
   }
 
   const handleSave = async () => {
     setError('')
     const v = value.trim()
-    if (!v) { setError('Field cannot be empty.'); return }
-    if (field === 'password' && v !== confirm) { setError('Passwords do not match.'); return }
-    if (field === 'password' && v.length < 6)  { setError('Password must be at least 6 characters.'); return }
+    if (!v) { setError(isAr ? 'لا يمكن ترك الحقل فارغاً.' : 'Field cannot be empty.'); return }
+    if (field === 'password' && v !== confirm) { setError(isAr ? 'كلمتا المرور غير متطابقتين.' : 'Passwords do not match.'); return }
+    if (field === 'password' && v.length < 6)  { setError(isAr ? 'يجب أن تكون كلمة المرور 6 أحرف على الأقل.' : 'Password must be at least 6 characters.'); return }
 
     setSaving(true)
     try {
@@ -57,7 +65,7 @@ function EditSheet({
       setDone(true)
       onSaved(field, v)
     } catch (e: any) {
-      setError(e?.message || 'Something went wrong. Try again.')
+      setError(e?.message || (isAr ? 'حدث خطأ ما. حاول مرة أخرى.' : 'Something went wrong. Try again.'))
     } finally {
       setSaving(false)
     }
@@ -71,42 +79,42 @@ function EditSheet({
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
       {/* Sheet */}
-      <div className="w-full max-w-sm bg-zinc-950 border border-zinc-800 rounded-t-3xl px-6 pt-6 pb-10 animate-in slide-in-from-bottom-4 duration-300">
+      <div className="w-full max-w-sm bg-zinc-950 border border-zinc-800 rounded-t-3xl px-6 pt-6 pb-10 animate-in slide-in-from-bottom-4 duration-300" dir={isAr ? 'rtl' : 'ltr'}>
         {/* Handle */}
         <div className="w-10 h-1 bg-zinc-800 rounded-full mx-auto mb-6" />
 
-        <p className="text-[9px] uppercase tracking-[0.3em] text-zinc-600 mb-1">
-          {field === 'username' ? 'Account' : field === 'email' ? 'Account' : 'Security'}
+        <p className={`text-[9px] text-zinc-600 mb-1 ${isAr ? '' : 'uppercase tracking-[0.3em]'}`}>
+          {field === 'password' ? (isAr ? 'الأمان' : 'Security') : (isAr ? 'الحساب' : 'Account')}
         </p>
         <h2 className="text-white text-base font-light mb-6">
-          Change {field.charAt(0).toUpperCase() + field.slice(1)}
+          {isAr ? `تغيير ${fieldNames[field]}` : `Change ${fieldNames[field]}`}
         </h2>
 
         {done ? (
           <div className="space-y-4">
             <p className="text-zinc-400 text-sm leading-relaxed">
               {field === 'email'
-                ? 'Check your new email address to confirm the change.'
-                : `Your ${field} has been updated.`}
+                ? (isAr ? 'تحقق من بريدك الإلكتروني الجديد لتأكيد التغيير.' : 'Check your new email address to confirm the change.')
+                : (isAr ? `تم تحديث ${fieldNames[field]}.` : `Your ${field} has been updated.`)}
             </p>
             <button
               onClick={onClose}
-              className="w-full h-12 bg-white text-black rounded-full text-[10px] font-bold uppercase tracking-widest hover:bg-zinc-100 transition-colors"
+              className={`w-full h-12 bg-white text-black rounded-full text-[10px] font-bold hover:bg-zinc-100 transition-colors ${isAr ? '' : 'uppercase tracking-widest'}`}
             >
-              Done
+              {isAr ? 'تم' : 'Done'}
             </button>
           </div>
         ) : (
           <div className="space-y-3">
             {field !== 'password' && (
               <p className="text-zinc-700 text-[11px] mb-1">
-                Current: <span className="text-zinc-500">{currentValue}</span>
+                {isAr ? 'الحالي:' : 'Current:'} <span className="text-zinc-500">{currentValue}</span>
               </p>
             )}
 
             <input
               type={field === 'password' ? 'password' : field === 'email' ? 'email' : 'text'}
-              placeholder={LABELS[field]}
+              placeholder={labels[field]}
               value={value}
               onChange={(e) => setValue(e.target.value)}
               autoFocus
@@ -116,7 +124,7 @@ function EditSheet({
             {field === 'password' && (
               <input
                 type="password"
-                placeholder="Confirm new password"
+                placeholder={isAr ? 'تأكيد كلمة المرور الجديدة' : 'Confirm new password'}
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
                 className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3.5 text-sm text-white placeholder-zinc-700 focus:outline-none focus:border-white/40 focus:ring-1 focus:ring-white/20 transition-all"
@@ -130,16 +138,16 @@ function EditSheet({
             <div className="flex gap-3 pt-1">
               <button
                 onClick={onClose}
-                className="flex-1 h-12 border border-zinc-800 text-zinc-500 rounded-full text-[10px] font-bold uppercase tracking-widest hover:border-zinc-600 hover:text-white transition-colors"
+                className={`flex-1 h-12 border border-zinc-800 text-zinc-500 rounded-full text-[10px] font-bold hover:border-zinc-600 hover:text-white transition-colors ${isAr ? '' : 'uppercase tracking-widest'}`}
               >
-                Cancel
+                {isAr ? 'إلغاء' : 'Cancel'}
               </button>
               <button
                 onClick={handleSave}
                 disabled={saving}
-                className="flex-1 h-12 bg-white text-black rounded-full text-[10px] font-bold uppercase tracking-widest hover:bg-zinc-100 transition-colors disabled:opacity-40"
+                className={`flex-1 h-12 bg-white text-black rounded-full text-[10px] font-bold hover:bg-zinc-100 transition-colors disabled:opacity-40 ${isAr ? '' : 'uppercase tracking-widest'}`}
               >
-                {saving ? 'Saving...' : 'Save'}
+                {saving ? (isAr ? 'جارٍ الحفظ...' : 'Saving...') : (isAr ? 'حفظ' : 'Save')}
               </button>
             </div>
           </div>
@@ -152,12 +160,34 @@ function EditSheet({
 // ─── Profile ──────────────────────────────────────────────────────────────────
 export default function ProfileDashboard() {
   const router = useRouter()
+  const { lang, isAr, setLang } = useLocale()
   const [loading, setLoading]       = useState(true)
   const [userEmail, setUserEmail]   = useState('')
   const [username, setUsername]     = useState('Style Icon')
   const [savedCount, setSavedCount] = useState(0)
   const [editField, setEditField]       = useState<EditField>(null)
   const [showAccountMenu, setShowAccountMenu] = useState(false)
+  const copy = isAr ? {
+    savedItems: 'المحفوظات',
+    account: 'الحساب',
+    buildEyebrow: 'اصنع إطلالة',
+    builderTitle: 'منسّق الإطلالات',
+    builderBody: 'نسّق القطع حول خزانتك. ارفع صورة أو صف أي قطعة.',
+    tapOpen: 'اضغط للفتح ←',
+    aiStylist: 'AI Stylist',
+    preferences: 'التفضيلات الشخصية',
+    signOut: 'تسجيل الخروج',
+  } : {
+    savedItems: 'Saved Items',
+    account: 'Account',
+    buildEyebrow: 'Build an Outfit',
+    builderTitle: 'Outfit Builder',
+    builderBody: 'Mix and match pieces around your wardrobe. Upload a photo or describe any item.',
+    tapOpen: 'Tap to open →',
+    aiStylist: 'AI Stylist',
+    preferences: 'Personal Preferences',
+    signOut: 'Sign Out',
+  }
 
   useEffect(() => {
     const fetchData = async () => {
@@ -195,16 +225,16 @@ export default function ProfileDashboard() {
   if (loading) return <LoadingScreen />
 
   return (
-    <div className="min-h-[100dvh] bg-black text-white relative">
+    <div className="min-h-[100dvh] bg-black text-white relative" dir={isAr ? 'rtl' : 'ltr'}>
       <ParticleCanvas />
 
       {/* ── Back button ── */}
       <div className="fixed top-0 left-0 right-0 z-20 px-5 pt-8 sm:pt-10 flex justify-between items-center">
         <button
           onClick={() => router.push('/feed')}
-          className="text-zinc-600 text-[10px] uppercase tracking-[0.3em] hover:text-white transition-colors min-h-[44px] flex items-center"
+          className={`text-zinc-600 text-[10px] hover:text-white transition-colors min-h-[44px] flex items-center ${isAr ? '' : 'uppercase tracking-[0.3em]'}`}
         >
-          Back
+          {isAr ? 'رجوع' : 'Back'}
         </button>
       </div>
 
@@ -219,14 +249,14 @@ export default function ProfileDashboard() {
             </span>
           </div>
 
-          <h1 className="text-base font-light tracking-widest text-white mb-1">{username}</h1>
-          <p className="text-zinc-600 text-[11px] tracking-wide mb-10">{userEmail}</p>
+          <h1 className={`text-base font-light text-white mb-1 ${isAr ? '' : 'tracking-widest'}`}>{username}</h1>
+          <p className={`text-zinc-600 text-[11px] mb-10 ${isAr ? '' : 'tracking-wide'}`}>{userEmail}</p>
 
           {/* Stats */}
           <div className="grid grid-cols-2 gap-3 w-full mb-8">
             <div className="bg-zinc-900/50 border border-zinc-800 p-5 rounded-2xl text-center">
               <div className="text-2xl font-bold text-white mb-1">{savedCount}</div>
-              <div className="text-[9px] uppercase tracking-widest text-zinc-600">Saved Items</div>
+              <div className={`text-[9px] text-zinc-600 ${isAr ? '' : 'uppercase tracking-widest'}`}>{copy.savedItems}</div>
             </div>
             <button
               onClick={() => setShowAccountMenu(true)}
@@ -236,7 +266,7 @@ export default function ProfileDashboard() {
                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
               </svg>
-              <div className="text-[9px] uppercase tracking-widest text-zinc-600">Account</div>
+              <div className={`text-[9px] text-zinc-600 ${isAr ? '' : 'uppercase tracking-widest'}`}>{copy.account}</div>
             </button>
           </div>
 
@@ -257,12 +287,12 @@ export default function ProfileDashboard() {
               </svg>
             </div>
             <div className="absolute inset-0 flex flex-col items-center justify-center px-5 text-center">
-              <span className="text-[9px] uppercase tracking-[0.3em] text-zinc-500 mb-2 group-hover:text-zinc-400 transition-colors">Build an Outfit</span>
-              <p className="text-white text-sm font-light leading-snug mb-1">Outfit Builder</p>
+              <span className={`text-[9px] text-zinc-500 mb-2 group-hover:text-zinc-400 transition-colors ${isAr ? '' : 'uppercase tracking-[0.3em]'}`}>{copy.buildEyebrow}</span>
+              <p className="text-white text-sm font-light leading-snug mb-1">{copy.builderTitle}</p>
               <p className="text-zinc-500 text-[11px] leading-relaxed max-w-[200px] group-hover:text-zinc-400 transition-colors">
-                Mix and match pieces around your wardrobe. Upload a photo or describe any item.
+                {copy.builderBody}
               </p>
-              <span className="mt-3 text-[9px] uppercase tracking-[0.25em] text-zinc-700 group-hover:text-zinc-500 transition-colors">Tap to open →</span>
+              <span className={`mt-3 text-[9px] text-zinc-700 group-hover:text-zinc-500 transition-colors ${isAr ? '' : 'uppercase tracking-[0.25em]'}`}>{copy.tapOpen}</span>
             </div>
           </button>
 
@@ -270,23 +300,23 @@ export default function ProfileDashboard() {
           <div className="w-full space-y-3 mb-6">
             <button
               onClick={() => router.push('/ai-stylist')}
-              className="w-full py-3.5 bg-white text-black font-bold text-[10px] uppercase tracking-widest rounded-full hover:bg-zinc-200 transition-colors min-h-[52px]"
+              className={`w-full py-3.5 bg-white text-black font-bold text-[10px] rounded-full hover:bg-zinc-200 transition-colors min-h-[52px] ${isAr ? '' : 'uppercase tracking-widest'}`}
             >
-              AI Stylist
+              {copy.aiStylist}
             </button>
             <button
               onClick={() => router.push('/profile/preferences')}
-              className="w-full py-3.5 border border-zinc-800 text-zinc-400 font-bold text-[10px] uppercase tracking-widest rounded-full hover:border-zinc-600 hover:text-white transition-colors min-h-[52px]"
+              className={`w-full py-3.5 border border-zinc-800 text-zinc-400 font-bold text-[10px] rounded-full hover:border-zinc-600 hover:text-white transition-colors min-h-[52px] ${isAr ? '' : 'uppercase tracking-widest'}`}
             >
-              Personal Preferences
+              {copy.preferences}
             </button>
           </div>
 
           <button
             onClick={async () => { await supabase.auth.signOut(); router.push('/login') }}
-            className="w-full py-3.5 border border-zinc-900 text-zinc-600 font-bold text-[10px] uppercase tracking-widest rounded-full hover:border-red-900/60 hover:text-red-500 transition-colors min-h-[52px]"
+            className={`w-full py-3.5 border border-zinc-900 text-zinc-600 font-bold text-[10px] rounded-full hover:border-red-900/60 hover:text-red-500 transition-colors min-h-[52px] ${isAr ? '' : 'uppercase tracking-widest'}`}
           >
-            Sign Out
+            {copy.signOut}
           </button>
 
         </div>
@@ -308,13 +338,13 @@ export default function ProfileDashboard() {
             style={{ animation: 'accountSheetIn 0.4s cubic-bezier(0.34,1.56,0.64,1) forwards' }}
           >
             <div className="w-10 h-1 bg-zinc-800 rounded-full mx-auto mb-6" />
-            <p className="text-[9px] uppercase tracking-[0.3em] text-zinc-600 mb-5">Account Settings</p>
+            <p className={`text-[9px] text-zinc-600 mb-5 ${isAr ? '' : 'uppercase tracking-[0.3em]'}`}>{isAr ? 'إعدادات الحساب' : 'Account Settings'}</p>
             <div className="border border-zinc-900 rounded-2xl overflow-hidden">
               {(
                 [
-                  { label: 'Change Username', sub: username,   field: 'username' as EditField },
-                  { label: 'Change Email',    sub: userEmail,  field: 'email'    as EditField },
-                  { label: 'Change Password', sub: '••••••••', field: 'password' as EditField },
+                  { label: isAr ? 'تغيير اسم المستخدم' : 'Change Username', sub: username,   field: 'username' as EditField },
+                  { label: isAr ? 'تغيير البريد الإلكتروني' : 'Change Email', sub: userEmail,  field: 'email'    as EditField },
+                  { label: isAr ? 'تغيير كلمة المرور' : 'Change Password', sub: '••••••••', field: 'password' as EditField },
                 ] as const
               ).map(({ label, sub, field }, i, arr) => (
                 <button
@@ -334,13 +364,35 @@ export default function ProfileDashboard() {
                   </svg>
                 </button>
               ))}
+              <div className="w-full flex items-center justify-between gap-4 px-4 py-4 border-t border-zinc-900">
+                <div>
+                  <p className="text-zinc-200 text-[13px]">{isAr ? 'اللغة' : 'Language'}</p>
+                  <p className="text-zinc-600 text-[11px] mt-0.5">{lang === 'ar' ? 'العربية' : 'English'}</p>
+                </div>
+                <div className="flex rounded-full border border-zinc-800 bg-black/30 p-1">
+                  <button
+                    onClick={() => setLang('en')}
+                    className={`rounded-full px-3 py-1.5 text-[10px] font-bold transition-all ${lang === 'en' ? 'bg-white text-black' : 'text-zinc-500 hover:text-white'}`}
+                    type="button"
+                  >
+                    EN
+                  </button>
+                  <button
+                    onClick={() => setLang('ar')}
+                    className={`rounded-full px-3 py-1.5 text-[10px] font-bold transition-all ${lang === 'ar' ? 'bg-white text-black' : 'text-zinc-500 hover:text-white'}`}
+                    type="button"
+                  >
+                    عربي
+                  </button>
+                </div>
+              </div>
             </div>
             <button
               onClick={() => setShowAccountMenu(false)}
-              className="w-full mt-4 h-11 border border-zinc-800 text-zinc-500 rounded-full text-[10px] font-bold uppercase tracking-widest hover:border-zinc-600 hover:text-white transition-colors"
+              className={`w-full mt-4 h-11 border border-zinc-800 text-zinc-500 rounded-full text-[10px] font-bold hover:border-zinc-600 hover:text-white transition-colors ${isAr ? '' : 'uppercase tracking-widest'}`}
               style={{ opacity: 0, animation: 'accountItemIn 0.3s ease forwards 300ms' }}
             >
-              Cancel
+              {isAr ? 'إلغاء' : 'Cancel'}
             </button>
           </div>
 
@@ -365,6 +417,7 @@ export default function ProfileDashboard() {
         <EditSheet
           field={editField}
           currentValue={editField === 'email' ? userEmail : editField === 'username' ? username : ''}
+          isAr={isAr}
           onClose={() => setEditField(null)}
           onSaved={(f, v) => { handleSaved(f, v); setEditField(null) }}
         />

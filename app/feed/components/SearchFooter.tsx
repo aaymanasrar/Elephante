@@ -35,6 +35,23 @@ export default function SearchFooter({
   onSubmit,
 }: SearchFooterProps) {
   const { isAr } = useLocale()
+  const copy = isAr ? {
+    identifying: 'جارٍ التعرّف...',
+    saving: 'جارٍ الحفظ...',
+    confirmTags: 'تأكيد الوسوم',
+    removePhoto: 'إزالة صورة الملابس',
+    attachPhoto: 'إرفاق صورة ملابس',
+    uploadPhoto: 'رفع صورة ملابس',
+    search: 'بحث',
+  } : {
+    identifying: 'Identifying...',
+    saving: 'Saving...',
+    confirmTags: 'Confirm Tags',
+    removePhoto: 'Remove uploaded clothing photo',
+    attachPhoto: 'Attach clothing photo',
+    uploadPhoto: 'Upload clothing photo',
+    search: 'Search',
+  }
 
   return (
     <div
@@ -55,7 +72,7 @@ export default function SearchFooter({
         />
 
         {attachment ? (
-          <div className="mb-2.5 bg-zinc-950/55 backdrop-blur-md border border-white/10 rounded-2xl px-3 py-3 space-y-3 shadow-[0_12px_40px_rgba(0,0,0,0.25)]">
+          <div className="mb-2.5 bg-zinc-950/55 backdrop-blur-md border border-white/10 rounded-2xl px-3 py-3 space-y-3 shadow-[0_12px_40px_rgba(0,0,0,0.25)]" dir={isAr ? 'rtl' : 'ltr'}>
             <div className="flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-lg overflow-hidden bg-zinc-800 flex-shrink-0 relative">
                 <Image src={attachment.preview} alt="" fill className="object-cover" unoptimized aria-hidden="true" />
@@ -64,7 +81,7 @@ export default function SearchFooter({
                 {attachment.uploading ? (
                   <div className="flex items-center gap-1.5">
                     <div className="w-3 h-3 border border-white/20 border-t-white/80 rounded-full animate-spin" />
-                    <span className="text-zinc-400 text-xs">Identifying...</span>
+                    <span className="text-zinc-400 text-xs">{copy.identifying}</span>
                   </div>
                 ) : (
                   <p className="text-white text-xs truncate">{attachment.item_name}</p>
@@ -73,7 +90,7 @@ export default function SearchFooter({
               <button
                 onClick={clearAttachment}
                 className="text-zinc-500 hover:text-white transition-colors flex-shrink-0"
-                aria-label="Remove uploaded clothing photo"
+                aria-label={copy.removePhoto}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
                   <path d="M18 6L6 18M6 6l12 12" />
@@ -90,7 +107,7 @@ export default function SearchFooter({
                       value={tag.label}
                       onChange={(event) => onTagChange(tag.id, event.target.value)}
                       className="px-3 py-1.5 rounded-full border border-zinc-800 bg-black/20 text-[11px] text-zinc-300 outline-none focus:border-zinc-600"
-                      aria-label={`${tag.id} tag`}
+                      aria-label={isAr ? `وسم ${tag.id}` : `${tag.id} tag`}
                     />
                   ))}
                 </div>
@@ -99,20 +116,20 @@ export default function SearchFooter({
                   disabled={attachment.confirming}
                   className="w-full rounded-full border border-zinc-700 text-zinc-300 text-[10px] uppercase tracking-[0.25em] py-2.5 hover:border-white hover:text-white transition-all disabled:opacity-50"
                 >
-                  {attachment.confirming ? 'Saving...' : 'Confirm Tags'}
+                  {attachment.confirming ? copy.saving : copy.confirmTags}
                 </button>
               </>
             ) : null}
           </div>
         ) : null}
 
-        <div className="flex items-center gap-2">
+        <div className={`flex items-center gap-2 ${isAr ? 'flex-row-reverse' : ''}`}>
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={attachment?.uploading}
             className="cursor-pointer flex-shrink-0 w-[52px] h-[56px] rounded-3xl bg-zinc-950/50 backdrop-blur-md border border-white/10 flex items-center justify-center text-zinc-400 hover:text-white hover:border-white/25 disabled:opacity-40 transition-all duration-200 shadow-[0_12px_36px_rgba(0,0,0,0.22)]"
-            title="Attach clothing photo"
-            aria-label="Upload clothing photo"
+            title={copy.attachPhoto}
+            aria-label={copy.uploadPhoto}
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
@@ -125,7 +142,7 @@ export default function SearchFooter({
             {placeholderOverlay}
             <input
               type="text"
-              dir="auto"
+              dir={isAr ? 'rtl' : 'ltr'}
               value={inputValue}
               onChange={(event) => onInputChange(event.target.value)}
               onKeyDown={(event) => {
@@ -137,13 +154,13 @@ export default function SearchFooter({
               autoComplete="off"
               autoCorrect="off"
               spellCheck={false}
-              aria-label="Search for outfits"
+              aria-label={isAr ? 'ابحث عن إطلالات' : 'Search for outfits'}
             />
             {inputValue.trim() && !isThinking ? (
               <button
                 onClick={onSubmit}
                 className={`cursor-pointer absolute ${isAr ? 'left-3' : 'right-3'} top-1/2 -translate-y-1/2 w-9 h-9 rounded-2xl bg-white flex items-center justify-center transition-all duration-200 hover:bg-zinc-100 active:scale-90`}
-                aria-label="Search"
+                aria-label={copy.search}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="black" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: isAr ? 'scaleX(-1)' : 'none' }}>
                   <path d="M5 12h14M12 5l7 7-7 7" />

@@ -10,15 +10,97 @@ import { detectPieceBrand, getAesthetic } from '@/lib/brands'
 import { useRequireUser } from '@/hooks/useRequireUser'
 import { canUseNextImage } from '@/lib/image'
 import { getFriendlyDataError } from '@/lib/supabaseErrors'
+import { useLocale } from '@/lib/locale-context'
 import type { Outfit, OutfitSource } from '@/types/outfit'
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
+function SectionLabel({ children, isAr = false }: { children: React.ReactNode; isAr?: boolean }) {
   return (
-    <p className="text-[9px] uppercase tracking-[0.3em] text-zinc-600 mb-4 flex items-center gap-3">
+    <p
+      className={`text-[9px] text-zinc-600 mb-4 flex items-center gap-3 ${isAr ? 'font-medium' : 'uppercase tracking-[0.3em]'}`}
+      style={{ fontFamily: isAr ? 'var(--font-arabic, serif)' : 'inherit' }}
+    >
       {children}
       <span className="flex-1 h-px bg-zinc-900" />
     </p>
   )
+}
+
+const outfitCopy = {
+  en: {
+    archive: 'Archive',
+    notFound: 'Outfit not found',
+    goBack: 'Go back',
+    generating: 'Generating...',
+    noImage: 'No Image',
+    colourPalette: 'Colour Palette',
+    occasions: 'Occasions',
+    whenToWear: 'When to Wear',
+    worksFor: 'Works for',
+    pieces: 'The Pieces',
+    materials: 'Materials',
+    material: 'Material',
+    notes: 'Notes',
+    analysing: 'Analysing...',
+    analyse: 'Analyse with AI',
+    reanalyse: 'Re-analyse with AI',
+    saved: 'Saved',
+    detailsNotes: 'Details & Notes',
+    proTip: 'Pro tip',
+    processing: 'Processing...',
+    savedToCloset: 'Saved to Closet',
+    saveToCloset: 'Save to Closet',
+    removeFromCloset: 'Remove from closet',
+  },
+  ar: {
+    archive: 'الأرشيف',
+    notFound: 'لم يتم العثور على الإطلالة',
+    goBack: 'رجوع',
+    generating: 'جارٍ الإنشاء...',
+    noImage: 'لا توجد صورة',
+    colourPalette: 'لوحة الألوان',
+    occasions: 'المناسبات',
+    whenToWear: 'متى تلبسها',
+    worksFor: 'تناسب',
+    pieces: 'القطع',
+    materials: 'المواد',
+    material: 'المادة',
+    notes: 'ملاحظات',
+    analysing: 'جارٍ التحليل...',
+    analyse: 'حلّل بالذكاء الاصطناعي',
+    reanalyse: 'إعادة التحليل بالذكاء الاصطناعي',
+    saved: 'محفوظة',
+    detailsNotes: 'التفاصيل والملاحظات',
+    proTip: 'نصيحة',
+    processing: 'جارٍ المعالجة...',
+    savedToCloset: 'محفوظة في الخزانة',
+    saveToCloset: 'حفظ في الخزانة',
+    removeFromCloset: 'إزالة من الخزانة',
+  },
+} as const
+
+const pieceLabels: Record<string, string> = {
+  Top: 'الجزء العلوي',
+  Bottom: 'الجزء السفلي',
+  Shoes: 'الأحذية',
+  Accessories: 'الإكسسوارات',
+  Outerwear: 'الطبقة الخارجية',
+  Extra: 'إضافة',
+  Shoe: 'الحذاء',
+}
+
+const toneLabels: Record<string, string> = {
+  'Light Skin': 'بشرة فاتحة',
+  'Medium Skin': 'بشرة متوسطة',
+  'Tan Skin': 'بشرة سمراء',
+  'Dark Skin': 'بشرة داكنة',
+}
+
+function localLabel(label: string, isAr: boolean) {
+  return isAr ? pieceLabels[label] || label : label
+}
+
+function localTone(label: string, isAr: boolean) {
+  return isAr ? toneLabels[label] || label : label
 }
 
 const COLOR_HEX: Record<string, string> = {
@@ -135,6 +217,8 @@ function OutfitHeroImage({ outfit, title }: { outfit: Outfit; title: string }) {
 export default function OutfitDetail() {
   const params = useParams()
   const router = useRouter()
+  const { isAr } = useLocale()
+  const t = isAr ? outfitCopy.ar : outfitCopy.en
   const { user } = useRequireUser('/login')
   const outfitId = params?.id as string
 
@@ -149,6 +233,12 @@ export default function OutfitDetail() {
   const [analysisError, setAnalysisError] = useState('')
   const [dataSaved, setDataSaved] = useState(false)
   const [generatingImage, setGeneratingImage] = useState(false)
+  const [arabicTranslations, setArabicTranslations] = useState<Record<string, string>>({})
+
+  const tr = (value: string | null | undefined) => {
+    if (!value) return value || ''
+    return isAr ? arabicTranslations[value] || value : value
+  }
 
   useEffect(() => {
     if (!outfitId) return
@@ -259,6 +349,69 @@ export default function OutfitDetail() {
       .catch(() => {})
   }, [outfit, source])
 
+  useEffect(() => {
+    if (!isAr || !outfit) {
+      setArabicTranslations({})
+      return
+    }
+
+    const rawOccasions = source === 'excel' ? outfit.occasions : outfit.occasion
+    const occasionTexts = rawOccasions
+      ? rawOccasions.split(/[|;,]/).map((value) => value.trim()).filter(Boolean)
+      : []
+    const aesthetic = getAesthetic((source === 'excel' ? outfit.color_scheme ?? null : null) || null, outfit.aesthetic || null)
+
+    const texts = [
+      deriveTitle(outfit, source),
+      source === 'excel' ? outfit.style_category : outfit.style,
+      source === 'excel' ? outfit.color_scheme : null,
+      source === 'excel' ? outfit.when_to_wear : null,
+      aesthetic?.label,
+      ...occasionTexts,
+      ...(Array.isArray(outfit.colors) ? outfit.colors : []),
+      ...(source === 'excel' ? [
+        outfit.top_wear,
+        outfit.bottom_wear,
+        outfit.shoes,
+        outfit.accessories,
+        outfit.outerwear,
+        outfit.material_top,
+        outfit.material_bottom,
+        outfit.material_shoes,
+        outfit.material_notes,
+      ] : []),
+      ...(Array.isArray(outfit.pieces) ? outfit.pieces : []),
+      outfit.top,
+      analysis?.outfit_name,
+      analysis?.vibe,
+      analysis?.style,
+      analysis?.color_scheme,
+      analysis?.why_it_works,
+      analysis?.styling_tip,
+    ].flat().filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+
+    if (texts.length === 0) return
+
+    const controller = new AbortController()
+    fetch('/api/translate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target: 'ar', texts }),
+      signal: controller.signal,
+    })
+      .then((response) => response.json())
+      .then((data) => {
+        if (data.translations && typeof data.translations === 'object') {
+          setArabicTranslations(data.translations)
+        }
+      })
+      .catch((error) => {
+        if (error?.name !== 'AbortError') console.warn('[translate outfit]', error)
+      })
+
+    return () => controller.abort()
+  }, [isAr, outfit, source, analysis])
+
   const handleAnalyse = async () => {
     if (!outfit?.image_url) return
     setAnalysing(true)
@@ -311,7 +464,7 @@ export default function OutfitDetail() {
         }
       }
     } catch {
-      setAnalysisError('Could not analyse image. Try again.')
+      setAnalysisError(isAr ? 'تعذّر تحليل الصورة. حاول مرة أخرى.' : 'Could not analyse image. Try again.')
     } finally {
       setAnalysing(false)
     }
@@ -349,23 +502,27 @@ export default function OutfitDetail() {
 
   if (fetchError || !outfit) {
     return (
-      <div className="min-h-screen bg-black flex flex-col items-center justify-center space-y-4 px-6">
+      <div className="min-h-screen bg-black flex flex-col items-center justify-center space-y-4 px-6" dir={isAr ? 'rtl' : 'ltr'}>
         <ParticleCanvas />
-        <p className="relative z-10 text-zinc-600 text-[10px] uppercase tracking-widest text-center">Outfit not found</p>
-        <button onClick={() => router.back()} className="relative z-10 text-zinc-500 text-[10px] uppercase tracking-widest hover:text-white transition mt-4" aria-label="Go back">
-          ← Go back
+        <p className={`relative z-10 text-zinc-600 text-[10px] text-center ${isAr ? '' : 'uppercase tracking-widest'}`}>{t.notFound}</p>
+        <button onClick={() => router.back()} className={`relative z-10 text-zinc-500 text-[10px] hover:text-white transition mt-4 ${isAr ? '' : 'uppercase tracking-widest'}`} aria-label={t.goBack}>
+          {isAr ? `${t.goBack} →` : `← ${t.goBack}`}
         </button>
       </div>
     )
   }
 
   const isExcel = source === 'excel'
-  const title = deriveTitle(outfit, source)
-  const styleLabel = isExcel ? outfit.style_category : outfit.style
-  const colorScheme = isExcel ? outfit.color_scheme ?? null : null
-  const whenTo = isExcel ? outfit.when_to_wear : null
+  const rawTitle = deriveTitle(outfit, source)
+  const title = tr(rawTitle)
+  const rawStyleLabel = isExcel ? outfit.style_category : outfit.style
+  const styleLabel = tr(rawStyleLabel)
+  const rawColorScheme = isExcel ? outfit.color_scheme ?? null : null
+  const colorScheme = tr(rawColorScheme) || null
+  const rawWhenTo = isExcel ? outfit.when_to_wear : null
+  const whenTo = tr(rawWhenTo) || null
   const outfitCode = outfit.outfit_code || null
-  const outfitAesthetic = getAesthetic(colorScheme || null, outfit.aesthetic || null)
+  const outfitAesthetic = getAesthetic(rawColorScheme || null, outfit.aesthetic || null)
   const brand = outfit.brand || null
   const rawOccasions = isExcel ? outfit.occasions : outfit.occasion
   const occasionList = rawOccasions
@@ -386,7 +543,7 @@ export default function OutfitDetail() {
     if (hexColors.length === 0) hexColors = outfit.colors.map(colorToHex)
   }
 
-  const worksFor = deriveWorksFor(outfit, colorScheme, hexColors)
+  const worksFor = deriveWorksFor(outfit, rawColorScheme, hexColors)
   const pieces: Array<{ label: string; value: string }> = []
   if (isExcel) {
     if (outfit.top_wear) pieces.push({ label: 'Top', value: outfit.top_wear })
@@ -417,18 +574,23 @@ export default function OutfitDetail() {
   })
 
   return (
-    <div className="min-h-screen bg-black text-white font-sans relative overflow-x-hidden">
+    <div className="min-h-screen bg-black text-white font-sans relative overflow-x-hidden" dir={isAr ? 'rtl' : 'ltr'}>
       <ParticleCanvas />
 
       <nav className="fixed top-0 w-full z-50 px-4 flex items-center justify-between bg-gradient-to-b from-black/80 to-transparent" style={{ paddingTop: 'max(1.25rem, env(safe-area-inset-top))', paddingBottom: '1rem', animation: 'fadeDown 0.5s cubic-bezier(0.4,0,0.2,1) both' }}>
         <button
           onClick={() => router.back()}
           className="cursor-pointer text-zinc-500 hover:text-white transition-colors duration-200 min-h-[44px] min-w-[44px] flex items-center gap-1.5 active:scale-90"
-          aria-label="Go back"
+          aria-label={t.goBack}
         >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M15 18l-6-6 6-6" /></svg>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" style={{ transform: isAr ? 'scaleX(-1)' : 'none' }}><path d="M15 18l-6-6 6-6" /></svg>
         </button>
-        <span className="text-[9px] tracking-[0.4em] uppercase text-zinc-700">Archive</span>
+        <span
+          className={`text-[9px] text-zinc-700 ${isAr ? '' : 'tracking-[0.4em] uppercase'}`}
+          style={{ fontFamily: isAr ? 'var(--font-arabic, serif)' : 'inherit' }}
+        >
+          {t.archive}
+        </span>
         <div className="w-[44px]" />
       </nav>
 
@@ -439,21 +601,21 @@ export default function OutfitDetail() {
           ) : generatingImage ? (
             <div className="w-full h-full flex flex-col items-center justify-center gap-3">
               <div className="w-6 h-6 border-2 border-white/10 border-t-white/60 rounded-full animate-spin" />
-              <span className="text-zinc-700 text-[9px] uppercase tracking-widest">Generating...</span>
+              <span className={`text-zinc-700 text-[9px] ${isAr ? '' : 'uppercase tracking-widest'}`}>{t.generating}</span>
             </div>
           ) : (
             <div className="w-full h-full flex items-center justify-center">
-              <span className="text-zinc-800 text-[9px] uppercase tracking-widest">No Image</span>
+              <span className={`text-zinc-800 text-[9px] ${isAr ? '' : 'uppercase tracking-widest'}`}>{t.noImage}</span>
             </div>
           )}
         </div>
 
         <div className="mb-7" style={fadeUp(0.1)}>
           <div className="flex items-center gap-2 mb-2 flex-wrap">
-            {styleLabel ? <span className="text-[9px] uppercase tracking-[0.3em] text-zinc-600 border border-zinc-800 rounded-full px-3 py-1">{styleLabel}</span> : null}
+            {styleLabel ? <span className={`text-[9px] text-zinc-600 border border-zinc-800 rounded-full px-3 py-1 ${isAr ? '' : 'uppercase tracking-[0.3em]'}`}>{styleLabel}</span> : null}
             {outfitCode ? <span className="text-[9px] uppercase tracking-[0.2em] text-zinc-800 font-mono">{outfitCode}</span> : null}
           </div>
-          {title.toLowerCase() !== (styleLabel || '').toLowerCase() ? (
+          {rawTitle.toLowerCase() !== (rawStyleLabel || '').toLowerCase() ? (
             <h1 className="text-[26px] font-light tracking-tight leading-snug text-white">{title}</h1>
           ) : null}
           {outfitAesthetic ? (
@@ -461,19 +623,19 @@ export default function OutfitDetail() {
               {outfitAesthetic.swatches.map((hex) => (
                 <div key={hex} className="w-3 h-3 rounded-full border border-white/10" style={{ backgroundColor: hex }} />
               ))}
-              <span className="text-[9px] uppercase tracking-[0.25em] text-zinc-600 ml-1">{outfitAesthetic.label}</span>
+              <span className={`text-[9px] text-zinc-600 ml-1 ${isAr ? '' : 'uppercase tracking-[0.25em]'}`}>{tr(outfitAesthetic.label)}</span>
             </div>
           ) : null}
         </div>
 
         {hexColors.length > 0 ? (
           <div className="mb-8" style={fadeUp(0.15)}>
-            <SectionLabel>Colour Palette</SectionLabel>
+            <SectionLabel isAr={isAr}>{t.colourPalette}</SectionLabel>
             <div className="flex gap-3 flex-wrap">
               {hexColors.map((hex, index) => (
                 <div key={`${hex}-${index}`} className="flex flex-col items-center gap-2">
                   <div className="w-11 h-11 rounded-full border-2 border-white/8 shadow-[0_4px_16px_rgba(0,0,0,0.5)] hover:scale-110 transition-transform duration-200 cursor-default" style={{ backgroundColor: hex, boxShadow: `0 4px 16px ${hex}30` }} title={colorNames[index] || hex} />
-                  {colorNames[index] ? <span className="text-[8px] text-zinc-600 uppercase tracking-wider text-center max-w-[44px] truncate">{colorNames[index]}</span> : null}
+                  {colorNames[index] ? <span className={`text-[8px] text-zinc-600 text-center max-w-[44px] truncate ${isAr ? '' : 'uppercase tracking-wider'}`}>{tr(colorNames[index])}</span> : null}
                 </div>
               ))}
             </div>
@@ -482,11 +644,11 @@ export default function OutfitDetail() {
 
         {occasionList.length > 0 ? (
           <div className="mb-8" style={fadeUp(0.2)}>
-            <SectionLabel>Occasions</SectionLabel>
+            <SectionLabel isAr={isAr}>{t.occasions}</SectionLabel>
             <div className="flex flex-wrap gap-2">
               {occasionList.map((occasion) => (
-                <span key={occasion} className="px-4 py-2 border border-zinc-800 rounded-full text-[10px] uppercase tracking-wider text-zinc-400 bg-zinc-950/50">
-                  {occasion}
+                <span key={occasion} className={`px-4 py-2 border border-zinc-800 rounded-full text-[10px] text-zinc-400 bg-zinc-950/50 ${isAr ? '' : 'uppercase tracking-wider'}`}>
+                  {tr(occasion)}
                 </span>
               ))}
             </div>
@@ -495,18 +657,18 @@ export default function OutfitDetail() {
 
         {whenTo ? (
           <div className="mb-8" style={fadeUp(0.25)}>
-            <SectionLabel>When to Wear</SectionLabel>
+            <SectionLabel isAr={isAr}>{t.whenToWear}</SectionLabel>
             <p className="text-sm text-zinc-400 leading-relaxed">{whenTo}</p>
           </div>
         ) : null}
 
         {worksFor.length > 0 ? (
           <div className="mb-8" style={fadeUp(0.27)}>
-            <SectionLabel>Works for</SectionLabel>
+            <SectionLabel isAr={isAr}>{t.worksFor}</SectionLabel>
             <div className="flex flex-wrap gap-2">
               {worksFor.map((tone) => (
-                <span key={tone} className="px-4 py-2 border border-zinc-800 rounded-full text-[10px] uppercase tracking-wider text-zinc-500 bg-zinc-950/50">
-                  {tone}
+                <span key={tone} className={`px-4 py-2 border border-zinc-800 rounded-full text-[10px] text-zinc-500 bg-zinc-950/50 ${isAr ? '' : 'uppercase tracking-wider'}`}>
+                  {localTone(tone, isAr)}
                 </span>
               ))}
             </div>
@@ -515,20 +677,24 @@ export default function OutfitDetail() {
 
         {pieces.length > 0 ? (
           <div className="mb-8" style={fadeUp(0.3)}>
-            <SectionLabel>The Pieces</SectionLabel>
+            <SectionLabel isAr={isAr}>{t.pieces}</SectionLabel>
             <div className="divide-y divide-zinc-900/80">
               {pieces.map((piece) => {
                 const brandInfo = detectPieceBrand(piece.value, brand)
                 return (
-                  <div key={`${piece.label}-${piece.value}`} className="flex items-center gap-3 py-3.5">
-                    <span className="text-[9px] uppercase tracking-[0.25em] text-zinc-700 w-20 shrink-0">{piece.label}</span>
-                    <span className="text-[13px] text-zinc-300 leading-snug flex-1">{piece.value}</span>
+                  <div
+                    key={`${piece.label}-${piece.value}`}
+                    className={`flex items-center gap-3 py-3.5 ${isAr ? 'flex-row-reverse' : ''}`}
+                  >
+                    <span className={`text-[9px] text-zinc-700 w-20 shrink-0 ${isAr ? 'text-left' : 'uppercase tracking-[0.25em]'}`}>{localLabel(piece.label, isAr)}</span>
+                    <span className={`text-[13px] text-zinc-300 leading-snug flex-1 ${isAr ? 'text-right' : ''}`}>{tr(piece.value)}</span>
                     {brandInfo ? (
                       <a
                         href={brandInfo.url}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="shrink-0 px-3 py-1 border border-zinc-800 rounded-full text-[9px] uppercase tracking-widest text-zinc-500 hover:border-zinc-500 hover:text-white transition-all duration-200 active:scale-95 whitespace-nowrap"
+                        dir="ltr"
                       >
                         {brandInfo.brand}
                       </a>
@@ -542,14 +708,14 @@ export default function OutfitDetail() {
 
         {materials.length > 0 ? (
           <div className="mb-8" style={fadeUp(0.38)}>
-            <SectionLabel>Materials</SectionLabel>
+            <SectionLabel isAr={isAr}>{t.materials}</SectionLabel>
             <div className="divide-y divide-zinc-900/80">
               {materials.map((material) => (
                 <div key={`${material.label}-${material.value}`} className="py-3.5">
-                  <p className="text-[9px] uppercase tracking-[0.25em] text-zinc-700 mb-1.5">
-                    {material.label ? `${material.label} Material` : 'Notes'}
+                  <p className={`text-[9px] text-zinc-700 mb-1.5 ${isAr ? '' : 'uppercase tracking-[0.25em]'}`}>
+                    {material.label ? (isAr ? `${t.material} ${localLabel(material.label, isAr)}` : `${material.label} ${t.material}`) : t.notes}
                   </p>
-                  <p className="text-[13px] text-zinc-400 leading-relaxed">{material.value}</p>
+                  <p className="text-[13px] text-zinc-400 leading-relaxed">{tr(material.value)}</p>
                 </div>
               ))}
             </div>
@@ -562,20 +728,20 @@ export default function OutfitDetail() {
             <button
               onClick={handleAnalyse}
               disabled={analysing}
-              className="cursor-pointer w-full h-12 rounded-2xl border border-zinc-800 text-zinc-500 text-[10px] font-bold uppercase tracking-[0.3em] hover:border-zinc-600 hover:text-white transition-all duration-300 active:scale-[0.97] disabled:opacity-40 flex items-center justify-center gap-2.5"
+              className={`cursor-pointer w-full h-12 rounded-2xl border border-zinc-800 text-zinc-500 text-[10px] font-bold hover:border-zinc-600 hover:text-white transition-all duration-300 active:scale-[0.97] disabled:opacity-40 flex items-center justify-center gap-2.5 ${isAr ? '' : 'uppercase tracking-[0.3em]'}`}
             >
               {analysing ? (
                 <>
                   <span className="w-3.5 h-3.5 border-2 border-zinc-700 border-t-zinc-300 rounded-full animate-spin" />
-                  Analysing...
+                  {t.analysing}
                 </>
               ) : (
                 <>
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M12 2L14.4 9.6L22 12L14.4 14.4L12 22L9.6 14.4L2 12L9.6 9.6L12 2Z" />
                   </svg>
-                  {dataSaved ? 'Re-analyse with AI' : analysis ? 'Re-analyse with AI' : 'Analyse with AI'}
-                  {dataSaved ? <span className="text-[9px] text-emerald-500/80 uppercase tracking-widest">· Saved</span> : null}
+                  {dataSaved ? t.reanalyse : analysis ? t.reanalyse : t.analyse}
+                  {dataSaved ? <span className={`text-[9px] text-emerald-500/80 ${isAr ? '' : 'uppercase tracking-widest'}`}>· {t.saved}</span> : null}
                 </>
               )}
             </button>
@@ -591,20 +757,20 @@ export default function OutfitDetail() {
                   </div>
                 ) : null}
                 <div>
-                  <p className="text-white text-base font-light">{analysis.outfit_name}</p>
-                  <p className="text-zinc-500 text-[11px] mt-0.5 tracking-wide">{analysis.vibe} · {analysis.style}</p>
+                  <p className="text-white text-base font-light">{tr(analysis.outfit_name)}</p>
+                  <p className="text-zinc-500 text-[11px] mt-0.5 tracking-wide">{tr(analysis.vibe)} · {tr(analysis.style)}</p>
                 </div>
-                {analysis.color_scheme ? <p className="text-zinc-600 text-[12px] italic">{analysis.color_scheme}</p> : null}
+                {analysis.color_scheme ? <p className="text-zinc-600 text-[12px] italic">{tr(analysis.color_scheme)}</p> : null}
                 {analysis.why_it_works ? (
                   <div className="pl-3 border-l-2 border-zinc-800">
-                    <p className="text-[9px] uppercase tracking-[0.2em] text-zinc-700 mb-1.5">Details & Notes</p>
-                    <p className="text-[13px] text-zinc-400 leading-relaxed">{analysis.why_it_works}</p>
+                    <p className={`text-[9px] text-zinc-700 mb-1.5 ${isAr ? '' : 'uppercase tracking-[0.2em]'}`}>{t.detailsNotes}</p>
+                    <p className="text-[13px] text-zinc-400 leading-relaxed">{tr(analysis.why_it_works)}</p>
                   </div>
                 ) : null}
                 {analysis.styling_tip ? (
                   <div className="pl-3 border-l-2 border-zinc-800">
-                    <p className="text-[9px] uppercase tracking-[0.2em] text-zinc-700 mb-1.5">Pro tip</p>
-                    <p className="text-[13px] text-zinc-400 leading-relaxed">{analysis.styling_tip}</p>
+                    <p className={`text-[9px] text-zinc-700 mb-1.5 ${isAr ? '' : 'uppercase tracking-[0.2em]'}`}>{t.proTip}</p>
+                    <p className="text-[13px] text-zinc-400 leading-relaxed">{tr(analysis.styling_tip)}</p>
                   </div>
                 ) : null}
               </div>
@@ -617,12 +783,12 @@ export default function OutfitDetail() {
         <button
           onClick={handleSave}
           disabled={isSaving}
-          className={`cursor-pointer w-full max-w-lg mx-auto flex items-center justify-center gap-2.5 py-4 text-[10px] uppercase tracking-[0.4em] font-bold transition-all duration-300 rounded-2xl active:scale-[0.97] ${
+          className={`cursor-pointer w-full max-w-lg mx-auto flex items-center justify-center gap-2.5 py-4 text-[10px] font-bold transition-all duration-300 rounded-2xl active:scale-[0.97] ${isAr ? '' : 'uppercase tracking-[0.4em]'} ${
             saved
               ? 'bg-transparent border border-zinc-800 text-zinc-500 hover:border-red-900/50 hover:text-red-400'
               : 'bg-white text-black hover:bg-zinc-100'
           }`}
-          aria-label={saved ? 'Remove from closet' : 'Save to closet'}
+          aria-label={saved ? t.removeFromCloset : t.saveToCloset}
         >
           {isSaving ? (
             <span className="w-3.5 h-3.5 border-2 border-current/30 border-t-current rounded-full animate-spin" />
@@ -635,7 +801,7 @@ export default function OutfitDetail() {
               <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
             </svg>
           )}
-          {isSaving ? 'Processing...' : saved ? 'Saved to Closet' : 'Save to Closet'}
+          {isSaving ? t.processing : saved ? t.savedToCloset : t.saveToCloset}
         </button>
       </div>
 

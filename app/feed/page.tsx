@@ -19,104 +19,28 @@ import { useElephanteData } from '@/hooks/useElephanteData'
 import { useFeedSearch } from '@/hooks/useFeedSearch'
 import { useWardrobeAttachment } from '@/hooks/useWardrobeAttachment'
 import { useRequireUser } from '@/hooks/useRequireUser'
+import { useArabicTranslations } from '@/hooks/useArabicTranslations'
 import { canUseNextImage } from '@/lib/image'
 import type { Outfit } from '@/types/outfit'
 
 const EN = 'What shall we dress you for today?'
 const AR = '\u0628\u0645\u0627\u0630\u0627 \u0646\u064f\u0644\u0628\u0633\u0643 \u0627\u0644\u064a\u0648\u0645\u061f'
-const ARABIC_CHARS = '\u0627\u0628\u062a\u062b\u062c\u062d\u062e\u062f\u0630\u0631\u0632\u0633\u0634\u0635\u0636\u0637\u0638\u0639\u063a\u0641\u0642\u0643\u0644\u0645\u0646\u0647\u0648\u064a'
 const NL_SIGNALS = ['suggest', 'suggestion', 'recommend', 'recommendation', 'help', 'need', 'want', 'have', 'going', 'date', 'event', 'tonight', 'evening', 'morning', 'special', 'something', 'occasion', 'meeting', 'interview', 'wedding', 'party', 'dinner', 'casual', 'formal', 'office', 'work', 'business', 'weekend', 'summer', 'winter', 'night', 'out', 'smart', 'what', 'which', 'give', 'me', 'feel', 'look', 'wear', 'style', 'fit', 'outfit', 'dress', 'rate']
 const POSSESSION_PREFIXES = ['i have', 'i own', "i've got", 'i got', "i'm wearing", 'wearing my', 'i wear']
 
-function GlitchPlaceholder({ active }: { active: boolean }) {
+function SearchPlaceholder({ active }: { active: boolean }) {
   const { isAr } = useLocale()
-  const [display, setDisplay] = useState(EN)
-  const [glitching, setGlitching] = useState(false)
-  const frameRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  useEffect(() => {
-    // When device is Arabic, just show the Arabic placeholder statically
-    if (isAr) {
-      setDisplay(AR)
-      return
-    }
-
-    if (active) return
-
-    let cancelled = false
-    const scrambleTo = (target: string, onDone: () => void) => {
-      let frame = 0
-      const totalFrames = 18
-
-      const tick = () => {
-        if (cancelled) return
-        frame += 1
-        const progress = frame / totalFrames
-        const result = target.split('').map((char, index) => {
-          if (char === ' ') return ' '
-          if (index / target.length < progress) return char
-          const pool = target === AR ? 'ABCDEFGHIJabcdefghij' : ARABIC_CHARS
-          return pool[Math.floor(Math.random() * pool.length)] || char
-        }).join('')
-
-        setDisplay(result)
-        if (frame < totalFrames) {
-          frameRef.current = setTimeout(tick, 45)
-        } else {
-          setDisplay(target)
-          setGlitching(false)
-          // Check cancelled flag before calling onDone to ensure chain is fully severed on unmount
-          if (!cancelled) onDone()
-        }
-      }
-
-      tick()
-    }
-
-    const cycle = () => {
-      if (cancelled) return
-
-      frameRef.current = setTimeout(() => {
-        if (cancelled) return
-        setGlitching(true)
-        scrambleTo(AR, () => {
-          frameRef.current = setTimeout(() => {
-            if (cancelled) return
-            setGlitching(true)
-            scrambleTo(EN, () => {
-              if (!cancelled) {
-                frameRef.current = setTimeout(cycle, 2800)
-              }
-            })
-          }, 2000)
-        })
-      }, 2800)
-    }
-
-    setDisplay(EN)
-    cycle()
-
-    return () => {
-      cancelled = true
-      if (frameRef.current) clearTimeout(frameRef.current)
-    }
-  }, [active, isAr])
 
   if (active) return null
-
-  const isArabic = isAr || display === AR || (glitching && display.split('').some((char) => ARABIC_CHARS.includes(char) && char !== ' '))
 
   return (
     <span
       className={`absolute z-10 top-1/2 -translate-y-1/2 pointer-events-none select-none text-zinc-500 text-base sm:text-sm truncate ${isAr ? 'right-6 left-14 text-right' : 'left-6 right-12 text-left'}`}
       style={{
-        fontFamily: isArabic ? 'var(--font-arabic, serif)' : 'inherit',
-        letterSpacing: glitching ? '0.02em' : 'normal',
-        textShadow: glitching ? '0 0 8px rgba(255,255,255,0.15)' : 'none',
-        transition: 'text-shadow 0.1s',
+        fontFamily: isAr ? 'var(--font-arabic, serif)' : 'inherit',
       }}
     >
-      {display}
+      {isAr ? AR : EN}
     </span>
   )
 }
@@ -171,11 +95,11 @@ function isNaturalQuery(query: string) {
   return words.some((word) => NL_SIGNALS.includes(word))
 }
 
-function OutfitCardImage({ outfit, alt }: { outfit: Outfit; alt: string }) {
+function OutfitCardImage({ outfit, alt, noImageLabel }: { outfit: Outfit; alt: string; noImageLabel: string }) {
   if (!outfit.image_url) {
     return (
       <div className="w-full h-full flex items-center justify-center">
-        <span className="text-zinc-800 text-[9px] uppercase tracking-widest">No image</span>
+        <span className="text-zinc-800 text-[9px] uppercase tracking-widest">{noImageLabel}</span>
       </div>
     )
   }
@@ -231,6 +155,7 @@ function GeneratedOutfitImage({
 function FeedContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const { lang, isAr } = useLocale()
   const { loading: authLoading } = useRequireUser('/login')
   const initialQuery = searchParams?.get('q') || ''
   const replaceUrl = useCallback((url: string) => {
@@ -294,6 +219,7 @@ function FeedContent() {
     userHeight,
     userSkinTone,
     userStylePref,
+    language: lang,
   })
 
   const {
@@ -344,6 +270,7 @@ function FeedContent() {
   }, [buildFollowUpPrompt, setInputValue, setSearchQuery])
 
   const boostedIds = aiContext?.intent ? getBoostedOutfits(aiContext.intent) : []
+  const noImageLabel = isAr ? 'لا توجد صورة' : 'No image'
 
   const genderFiltered = useMemo(() => {
     return allOutfits.filter((item) => {
@@ -372,6 +299,16 @@ function FeedContent() {
       return bScore - aScore
     })
   }, [searchQuery, aiContext, sortedFeed, genderFiltered, boostedIds, userSkinTone, userPalettes, userBodyShape])
+
+  const translateFeedText = useArabicTranslations([
+    ...filteredOutfits.map((outfit) => outfit.style || outfit.aesthetic?.replace(/^(male|female)\s+/i, '') || 'Outfit'),
+    ...(generatedOutfit?.outfit ? [
+      generatedOutfit.outfit.style,
+      generatedOutfit.outfit.outfit_name,
+      generatedOutfit.outfit.alternative?.style,
+      generatedOutfit.outfit.alternative?.outfit_name,
+    ] : []),
+  ], isAr)
 
   if (loading || authLoading) return <LoadingScreen />
 
@@ -442,7 +379,7 @@ function FeedContent() {
               {/* Colour palette under the latest assistant bubble */}
               {!isThinking && finalBanner?.colors?.length ? (
                 <div className="ml-8 animate-in fade-in duration-500" style={{ animationDelay: '700ms', animationFillMode: 'both' }}>
-                  <p className="text-[9px] uppercase tracking-[0.3em] text-zinc-600 mb-2">Your colour palette</p>
+                  <p className="text-[9px] uppercase tracking-[0.3em] text-zinc-600 mb-2">{isAr ? 'لوحة ألوانك' : 'Your colour palette'}</p>
                   <div className="flex flex-wrap gap-2">
                     {finalBanner.colors.map((color) => (
                       <div key={`${color.hex}-${color.name}`} className="flex flex-col items-center gap-1">
@@ -457,7 +394,7 @@ function FeedContent() {
               {/* Clarification chips — shown as quick-reply options */}
               {!isThinking && aiContext?.needs_clarification ? (
                 <div className="ml-8 flex flex-wrap gap-2 animate-in fade-in duration-500" style={{ animationDelay: '400ms', animationFillMode: 'both' }}>
-                  {['Smart Casual', 'Formal / Work', 'Weekend Casual', 'Night Out', 'Summer Look'].map((chip) => (
+                  {(isAr ? ['كاجوال أنيق', 'رسمي / عمل', 'نهاية الأسبوع', 'سهرة', 'إطلالة صيفية'] : ['Smart Casual', 'Formal / Work', 'Weekend Casual', 'Night Out', 'Summer Look']).map((chip) => (
                     <button
                       key={chip}
                       onClick={() => handleChipTap(chip)}
@@ -472,7 +409,7 @@ function FeedContent() {
               {/* Follow-up chips after a successful response */}
               {!isThinking && !aiContext?.needs_clarification && chatHistory.length >= 2 && finalBanner && !generatingOutfit ? (
                 <div className="ml-8 flex flex-wrap gap-2 animate-in fade-in duration-500" style={{ animationDelay: '1000ms', animationFillMode: 'both' }}>
-                  {['More formal', 'More casual', 'Different colours', 'Summer version', 'Night out version'].map((chip) => (
+                  {(isAr ? ['أكثر رسمية', 'أكثر كاجوال', 'ألوان مختلفة', 'نسخة صيفية', 'نسخة للسهرة'] : ['More formal', 'More casual', 'Different colours', 'Summer version', 'Night out version']).map((chip) => (
                     <button
                       key={chip}
                       onClick={() => handleChipTap(chip)}
@@ -492,10 +429,10 @@ function FeedContent() {
                       onClick={triggerCuration}
                       className="px-5 py-2.5 rounded-full bg-white text-black text-[11px] font-bold uppercase tracking-[0.2em] hover:bg-zinc-200 transition-all duration-300 active:scale-95"
                     >
-                      Yes, curate for me →
+                      {isAr ? 'نعم، نسّقها لي ←' : 'Yes, curate for me →'}
                     </button>
                   ) : (
-                    <p className="text-zinc-600 text-[10px] uppercase tracking-widest animate-pulse">Building your look...</p>
+                    <p className="text-zinc-600 text-[10px] uppercase tracking-widest animate-pulse">{isAr ? 'جارٍ بناء إطلالتك...' : 'Building your look...'}</p>
                   )}
                 </div>
               ) : null}
@@ -516,7 +453,7 @@ function FeedContent() {
                     <img src="/logo.png" alt="" className="w-9 h-9 object-contain" style={{ filter: 'invert(1)', opacity: 1 }} aria-hidden="true" />
                   </div>
                   <div className="px-4 py-3 rounded-2xl rounded-bl-sm bg-zinc-900/80 border border-zinc-800/60">
-                    <div className="flex gap-[5px] items-center" aria-label="Elephante is thinking">
+                    <div className="flex gap-[5px] items-center" aria-label={isAr ? 'Elephante يفكر' : 'Elephante is thinking'}>
                       <span className="w-1.5 h-1.5 rounded-full bg-white/50 animate-bounce" style={{ animationDelay: '0ms' }} />
                       <span className="w-1.5 h-1.5 rounded-full bg-white/35 animate-bounce" style={{ animationDelay: '150ms' }} />
                       <span className="w-1.5 h-1.5 rounded-full bg-white/20 animate-bounce" style={{ animationDelay: '300ms' }} />
@@ -535,7 +472,7 @@ function FeedContent() {
                   <div className="flex items-center gap-3 mb-5">
                     <div className="h-px bg-zinc-900 flex-1" />
                     <span className="text-zinc-700 text-[9px] uppercase tracking-widest">
-                      {generatingOutfit ? 'Creating your look...' : `${filteredOutfits.length} outfit${filteredOutfits.length !== 1 ? 's' : ''}`}
+                      {generatingOutfit ? (isAr ? 'جارٍ إنشاء إطلالتك...' : 'Creating your look...') : (isAr ? `${filteredOutfits.length} إطلالة` : `${filteredOutfits.length} outfit${filteredOutfits.length !== 1 ? 's' : ''}`)}
                     </span>
                     <div className="h-px bg-zinc-900 flex-1" />
                   </div>
@@ -543,7 +480,7 @@ function FeedContent() {
 
                 {!isThinking && aiContext?.mode !== 'advice' && filteredOutfits.length === 0 && !generatingOutfit && !generatedOutfit ? (
                   <p className="text-zinc-700 text-[11px] text-center py-8 leading-relaxed">
-                    {searchQuery ? feedTranslations.en.emptySearch : feedTranslations.en.emptyFeed}
+                    {searchQuery ? feedTranslations[lang].emptySearch : feedTranslations[lang].emptyFeed}
                   </p>
                 ) : null}
 
@@ -564,15 +501,15 @@ function FeedContent() {
                       <div className="group cursor-pointer" style={{ opacity: 0, animation: 'cardIn 0.45s ease forwards', animationDelay: '0ms' }} onClick={() => handleGeneratedTap('primary')}>
                         <div className="relative w-full aspect-[3/4] overflow-hidden rounded-xl sm:rounded-2xl bg-zinc-900 transition-transform duration-300 group-hover:scale-[1.02] group-active:scale-[0.98]">
                           {generatedOutfit.image_url ? (
-                            <GeneratedOutfitImage src={generatedOutfit.image_url} alt={generatedOutfit.outfit?.outfit_name || 'Generated outfit'} className="w-full h-full object-cover object-top opacity-75 group-hover:opacity-100 transition-opacity duration-400" />
+                            <GeneratedOutfitImage src={generatedOutfit.image_url} alt={generatedOutfit.outfit?.outfit_name || (isAr ? 'إطلالة مولّدة' : 'Generated outfit')} className="w-full h-full object-cover object-top opacity-75 group-hover:opacity-100 transition-opacity duration-400" />
                           ) : (
-                            <div className="w-full h-full flex items-center justify-center"><span className="text-zinc-800 text-[9px] uppercase tracking-widest">No image</span></div>
+                            <div className="w-full h-full flex items-center justify-center"><span className="text-zinc-800 text-[9px] uppercase tracking-widest">{noImageLabel}</span></div>
                           )}
                           <span className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-black/60 text-[8px] uppercase tracking-widest text-zinc-400 border border-zinc-800/60">AI</span>
                         </div>
                         {generatedOutfit.outfit?.style || generatedOutfit.outfit?.outfit_name ? (
                           <p className="mt-1.5 text-[9px] uppercase tracking-[0.2em] text-zinc-600 group-hover:text-zinc-400 truncate px-0.5 transition-colors duration-200">
-                            {generatedOutfit.outfit?.style || generatedOutfit.outfit?.outfit_name}
+                            {translateFeedText(generatedOutfit.outfit?.style || generatedOutfit.outfit?.outfit_name)}
                           </p>
                         ) : null}
                       </div>
@@ -581,15 +518,15 @@ function FeedContent() {
                         <div className="group cursor-pointer" style={{ opacity: 0, animation: 'cardIn 0.45s ease forwards', animationDelay: '80ms' }} onClick={() => handleGeneratedTap('alternative')}>
                           <div className="relative w-full aspect-[3/4] overflow-hidden rounded-xl sm:rounded-2xl bg-zinc-900 transition-transform duration-300 group-hover:scale-[1.02] group-active:scale-[0.98]">
                             {generatedOutfit.alternative_image_url ? (
-                              <GeneratedOutfitImage src={generatedOutfit.alternative_image_url} alt={generatedOutfit.outfit.alternative?.outfit_name || 'Suggested outfit'} className="w-full h-full object-cover opacity-75 group-hover:opacity-100 transition-opacity duration-400" />
+                              <GeneratedOutfitImage src={generatedOutfit.alternative_image_url} alt={generatedOutfit.outfit.alternative?.outfit_name || (isAr ? 'إطلالة مقترحة' : 'Suggested outfit')} className="w-full h-full object-cover opacity-75 group-hover:opacity-100 transition-opacity duration-400" />
                             ) : (
-                              <div className="w-full h-full flex items-center justify-center"><span className="text-zinc-800 text-[9px] uppercase tracking-widest">No image</span></div>
+                              <div className="w-full h-full flex items-center justify-center"><span className="text-zinc-800 text-[9px] uppercase tracking-widest">{noImageLabel}</span></div>
                             )}
                             <span className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-black/60 text-[8px] uppercase tracking-widest text-zinc-400 border border-zinc-800/60">Alt</span>
                           </div>
                           {generatedOutfit.outfit.alternative?.style || generatedOutfit.outfit.alternative?.outfit_name ? (
                             <p className="mt-1.5 text-[9px] uppercase tracking-[0.2em] text-zinc-600 group-hover:text-zinc-400 truncate px-0.5 transition-colors duration-200">
-                              {generatedOutfit.outfit.alternative?.style || generatedOutfit.outfit.alternative?.outfit_name}
+                              {translateFeedText(generatedOutfit.outfit.alternative?.style || generatedOutfit.outfit.alternative?.outfit_name)}
                             </p>
                           ) : null}
                         </div>
@@ -600,7 +537,7 @@ function FeedContent() {
                   {filteredOutfits.map((outfit, index) => {
                     const isBoosted = boostedIds.includes(String(outfit.id))
                     const aiReason = aiContext?.suggestions?.find((suggestion) => String(suggestion.outfit_id) === String(outfit.id))?.reason
-                    const tag = outfit.style || outfit.aesthetic?.replace(/^(male|female)\s+/i, '') || 'Outfit'
+                    const tag = outfit.style || outfit.aesthetic?.replace(/^(male|female)\s+/i, '') || (isAr ? 'إطلالة' : 'Outfit')
 
                     return (
                       <div
@@ -614,7 +551,7 @@ function FeedContent() {
                         }}
                       >
                         <div className="relative w-full aspect-[3/4] overflow-hidden rounded-xl sm:rounded-2xl bg-zinc-900 transition-transform duration-300 group-hover:scale-[1.02] group-active:scale-[0.97]">
-                          <OutfitCardImage outfit={outfit} alt={tag} />
+                          <OutfitCardImage outfit={outfit} alt={tag} noImageLabel={noImageLabel} />
                           {isBoosted ? (
                             <div className="absolute top-2 left-2 w-1.5 h-1.5 rounded-full bg-white/70 shadow-[0_0_6px_rgba(255,255,255,0.5)]" />
                           ) : null}
@@ -622,7 +559,7 @@ function FeedContent() {
                         {aiReason ? (
                           <p className="mt-1.5 text-[10px] text-zinc-500 group-hover:text-zinc-400 leading-snug px-0.5 line-clamp-2 transition-colors duration-200">{aiReason}</p>
                         ) : (
-                          <p className="mt-1.5 text-[9px] uppercase tracking-[0.2em] text-zinc-700 group-hover:text-zinc-500 truncate px-0.5 transition-colors duration-200">{tag}</p>
+                          <p className="mt-1.5 text-[9px] uppercase tracking-[0.2em] text-zinc-700 group-hover:text-zinc-500 truncate px-0.5 transition-colors duration-200">{translateFeedText(tag)}</p>
                         )}
                       </div>
                     )
@@ -660,7 +597,7 @@ function FeedContent() {
           setInputValue('')
         }}
         onTagChange={updateTag}
-        placeholderOverlay={<GlitchPlaceholder active={inputValue.length > 0} />}
+        placeholderOverlay={<SearchPlaceholder active={inputValue.length > 0} />}
       />
     </div>
   )

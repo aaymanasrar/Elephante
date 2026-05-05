@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useRequireUser } from '@/hooks/useRequireUser'
 import ParticleCanvas from '@/components/ParticleCanvas'
+import { useLocale } from '@/lib/locale-context'
 
 type InputMode = 'prompt' | 'url' | 'photo' | null
 
@@ -26,6 +27,61 @@ const ZONES: { key: ZoneKey; label: string; emoji: string; hint: string }[] = [
   { key: 'shoes',       label: 'Shoes',       emoji: '👟', hint: 'Sneakers, boots, heels…' },
   { key: 'accessories', label: 'Accessories', emoji: '💍', hint: 'Watch, bag, hat…' },
 ]
+
+const ZONE_AR: Record<ZoneKey, { label: string; hint: string }> = {
+  top: { label: 'علوي', hint: 'قميص، تيشيرت، بلوزة...' },
+  outerwear: { label: 'طبقة خارجية', hint: 'جاكيت، معطف، بليزر...' },
+  bottom: { label: 'سفلي', hint: 'بنطال، تنورة، شورت...' },
+  shoes: { label: 'أحذية', hint: 'سنيكرز، بوت، كعب...' },
+  accessories: { label: 'إكسسوارات', hint: 'ساعة، حقيبة، قبعة...' },
+}
+
+const builderCopy = {
+  en: {
+    back: 'Back',
+    title: 'Outfit Builder',
+    save: 'Save',
+    clear: 'Clear',
+    uploadPhoto: 'Upload photo',
+    pasteUrl: 'Paste URL',
+    describe: 'Describe it',
+    pasteProductUrl: 'Paste any product URL...',
+    describeYour: (label: string) => `Describe your ${label.toLowerCase()}...`,
+    add: 'Add',
+    tapZone: 'Tap a zone to style it',
+    consulting: 'Consulting AI Stylist...',
+    rate: 'Rate This Outfit!',
+    uploadBoth: 'Upload Top + Bottom Photos',
+    verdict: 'AI Stylist Verdict',
+    match: 'Match',
+    strong: 'Absolutely amazing. These pieces were made for each other.',
+    weak: 'Hmm. You might want to rethink this combination.',
+    uploadError: 'Upload photos for both Top and Bottom to test the outfit.',
+    failed: 'Failed to test outfit match.',
+  },
+  ar: {
+    back: 'رجوع',
+    title: 'منسق الإطلالة',
+    save: 'حفظ',
+    clear: 'مسح',
+    uploadPhoto: 'رفع صورة',
+    pasteUrl: 'إضافة رابط',
+    describe: 'وصف القطعة',
+    pasteProductUrl: 'الصق رابط المنتج...',
+    describeYour: (label: string) => `صف قطعة ${label}...`,
+    add: 'إضافة',
+    tapZone: 'اضغط على جزء لتنسيقه',
+    consulting: 'جارٍ استشارة AI Stylist...',
+    rate: 'قيّم هذه الإطلالة',
+    uploadBoth: 'ارفع صورة العلوي والسفلي',
+    verdict: 'AI Stylist Verdict',
+    match: 'توافق',
+    strong: 'ممتازة جداً. القطع كأنها صنعت لبعضها.',
+    weak: 'قد تحتاج إلى إعادة التفكير في هذا التنسيق.',
+    uploadError: 'ارفع صورتي الجزء العلوي والسفلي لاختبار الإطلالة.',
+    failed: 'تعذّر اختبار توافق الإطلالة.',
+  },
+} as const
 
 const EMPTY_ZONE = (): ZoneItem => ({
   label: '',
@@ -136,6 +192,8 @@ function ZoneInput({
   onPhotoSelect,
   onConfirm,
   onClear,
+  isAr,
+  copy,
 }: {
   zone: { key: ZoneKey; label: string; hint: string; emoji: string }
   item: ZoneItem
@@ -143,8 +201,12 @@ function ZoneInput({
   onPhotoSelect: () => void
   onConfirm: () => void
   onClear: () => void
+  isAr: boolean
+  copy: typeof builderCopy.en | typeof builderCopy.ar
 }) {
   const hasContent = item.preview || item.prompt
+  const label = isAr ? ZONE_AR[zone.key].label : zone.label
+  const hint = isAr ? ZONE_AR[zone.key].hint : zone.hint
 
   return (
     <div className={`rounded-2xl border transition-all duration-200 ${hasContent ? 'border-zinc-600 bg-zinc-900/80' : 'border-zinc-800 bg-zinc-900/40'}`}>
@@ -153,8 +215,8 @@ function ZoneInput({
         <div className="flex items-center gap-2.5">
           <span className="text-base">{zone.emoji}</span>
           <div>
-            <p className="text-[11px] font-semibold text-white uppercase tracking-widest">{zone.label}</p>
-            {!hasContent && <p className="text-[10px] text-zinc-600">{zone.hint}</p>}
+            <p className={`text-[11px] font-semibold text-white ${isAr ? '' : 'uppercase tracking-widest'}`}>{label}</p>
+            {!hasContent && <p className="text-[10px] text-zinc-600">{hint}</p>}
             {item.prompt && !item.preview && <p className="text-[10px] text-zinc-400 truncate max-w-[160px]">{item.prompt}</p>}
           </div>
         </div>
@@ -164,7 +226,7 @@ function ZoneInput({
             <button
               onClick={onClear}
               className="text-zinc-600 hover:text-red-400 transition-colors p-1"
-              aria-label="Clear"
+              aria-label={copy.clear}
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
                 <path d="M18 6L6 18M6 6l12 12" />
@@ -176,7 +238,7 @@ function ZoneInput({
               <button
                 onClick={onPhotoSelect}
                 className={`p-2 rounded-xl transition-all ${item.inputMode === 'photo' ? 'bg-white/10 text-white' : 'text-zinc-600 hover:text-white'}`}
-                title="Upload photo"
+                title={copy.uploadPhoto}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
@@ -187,7 +249,7 @@ function ZoneInput({
               <button
                 onClick={() => onChange({ inputMode: item.inputMode === 'url' ? null : 'url', inputDraft: '' })}
                 className={`p-2 rounded-xl transition-all ${item.inputMode === 'url' ? 'bg-white/10 text-white' : 'text-zinc-600 hover:text-white'}`}
-                title="Paste URL"
+                title={copy.pasteUrl}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
@@ -198,7 +260,7 @@ function ZoneInput({
               <button
                 onClick={() => onChange({ inputMode: item.inputMode === 'prompt' ? null : 'prompt', inputDraft: '' })}
                 className={`p-2 rounded-xl transition-all ${item.inputMode === 'prompt' ? 'bg-white/10 text-white' : 'text-zinc-600 hover:text-white'}`}
-                title="Describe it"
+                title={copy.describe}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
@@ -210,7 +272,7 @@ function ZoneInput({
           {/* Preview thumbnail */}
           {item.preview && (
             <div className="w-10 h-10 rounded-xl overflow-hidden bg-zinc-800 ml-1 flex-shrink-0 relative">
-              <img src={item.preview} alt={zone.label} className="w-full h-full object-cover" />
+              <img src={item.preview} alt={label} className="w-full h-full object-cover" />
             </div>
           )}
         </div>
@@ -221,7 +283,7 @@ function ZoneInput({
         <div className="px-4 pb-3 flex gap-2">
           <input
             type={item.inputMode === 'url' ? 'url' : 'text'}
-            placeholder={item.inputMode === 'url' ? 'Paste any product URL…' : `Describe your ${zone.label.toLowerCase()}…`}
+            placeholder={item.inputMode === 'url' ? copy.pasteProductUrl : copy.describeYour(label)}
             value={item.inputDraft}
             onChange={(e) => onChange({ inputDraft: e.target.value })}
             onKeyDown={(e) => e.key === 'Enter' && item.inputDraft.trim() && onConfirm()}
@@ -233,7 +295,7 @@ function ZoneInput({
             disabled={!item.inputDraft.trim()}
             className="px-3 py-2 bg-white text-black rounded-xl text-[10px] font-bold uppercase tracking-widest disabled:opacity-30 transition-opacity active:scale-95"
           >
-            Add
+            {copy.add}
           </button>
         </div>
       )}
@@ -243,6 +305,8 @@ function ZoneInput({
 
 export default function OutfitBuilder() {
   const router = useRouter()
+  const { isAr } = useLocale()
+  const copy = isAr ? builderCopy.ar : builderCopy.en
   const { user } = useRequireUser('/login')
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const fileTargetZoneRef = useRef<ZoneKey | null>(null)
@@ -369,7 +433,7 @@ export default function OutfitBuilder() {
 
     if (!shirtFile || !pantsFile) {
       setMatchScore(null)
-      setMatchError('Upload photos for both Top and Bottom to test the outfit.')
+      setMatchError(copy.uploadError)
       return
     }
 
@@ -381,7 +445,7 @@ export default function OutfitBuilder() {
       const score = await checkOutfitMatch(shirtFile, pantsFile, userSkinTone)
       setMatchScore(score)
     } catch (error) {
-      setMatchError(error instanceof Error ? error.message : 'Failed to test outfit match.')
+      setMatchError(error instanceof Error ? error.message : copy.failed)
     } finally {
       setIsLoading(false)
     }
@@ -391,7 +455,7 @@ export default function OutfitBuilder() {
   const hasMatchPhotos = Boolean(zones.top.file && zones.bottom.file)
 
   return (
-    <div className="min-h-[100dvh] bg-black text-white relative">
+    <div className="min-h-[100dvh] bg-black text-white relative" dir={isAr ? 'rtl' : 'ltr'}>
       <ParticleCanvas />
 
       {/* Hidden file input */}
@@ -409,12 +473,12 @@ export default function OutfitBuilder() {
           onClick={() => router.back()}
           className="text-zinc-600 text-[10px] uppercase tracking-[0.3em] hover:text-white transition-colors min-h-[44px] flex items-center"
         >
-          ← Back
+          {isAr ? `${copy.back} →` : `← ${copy.back}`}
         </button>
-        <h1 className="text-[11px] font-bold tracking-[0.4em] text-zinc-500 uppercase">Outfit Builder</h1>
+        <h1 className="text-[11px] font-bold tracking-[0.4em] text-zinc-500 uppercase">{copy.title}</h1>
         {filledCount > 0 ? (
           <button className="text-[10px] uppercase tracking-widest text-white bg-zinc-800 hover:bg-zinc-700 px-3 py-1.5 rounded-full transition-colors">
-            Save ({filledCount})
+            {copy.save} ({filledCount})
           </button>
         ) : (
           <div className="w-16" />
@@ -442,7 +506,7 @@ export default function OutfitBuilder() {
             )}
           </div>
           <p className="text-[10px] uppercase tracking-widest text-zinc-700 mt-3 text-center">
-            Tap a zone to style it
+            {copy.tapZone}
           </p>
         </div>
 
@@ -464,6 +528,8 @@ export default function OutfitBuilder() {
                 onPhotoSelect={() => handlePhotoSelect(zone.key)}
                 onConfirm={() => handleConfirm(zone.key)}
                 onClear={() => handleClear(zone.key)}
+                isAr={isAr}
+                copy={copy}
               />
             </div>
           ))}
@@ -474,22 +540,22 @@ export default function OutfitBuilder() {
               disabled={isLoading}
               className="w-full mt-2 py-4 bg-white text-black font-bold text-[10px] uppercase tracking-widest rounded-2xl hover:bg-zinc-100 transition-colors active:scale-[0.98] min-h-[52px] disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              {isLoading ? 'Consulting AI Stylist...' : hasMatchPhotos ? 'Rate This Outfit!' : 'Upload Top + Bottom Photos'}
+              {isLoading ? copy.consulting : hasMatchPhotos ? copy.rate : copy.uploadBoth}
             </button>
           )}
 
           {matchScore !== null && (
             <div className="mt-4 p-4 border rounded bg-gray-50 text-center">
-              <h3 className="text-xl font-bold text-gray-950">AI Stylist Verdict</h3>
+              <h3 className="text-xl font-bold text-gray-950">{copy.verdict}</h3>
 
               <p className="text-3xl font-extrabold text-blue-600 mt-2">
-                {matchScore}% Match
+                {matchScore}% {copy.match}
               </p>
 
               <p className="mt-2 text-gray-600">
                 {matchScore > 75
-                  ? 'Absolute Amazing. These pieces were made for each other.'
-                  : 'Hmm. You might want to rethink this combination.'}
+                  ? copy.strong
+                  : copy.weak}
               </p>
             </div>
           )}

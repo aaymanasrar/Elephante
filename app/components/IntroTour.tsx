@@ -1,11 +1,14 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { useLocale } from '@/lib/locale-context'
 
 interface Step {
   id: string
   title: string
+  titleAr: string
   description: string
+  descriptionAr: string
   targetId: string
   preferredPlacement: 'bottom' | 'left'
 }
@@ -14,34 +17,43 @@ const STEPS: Step[] = [
   {
     id: 'ai-stylist',
     title: 'Elephante AI',
+    titleAr: 'Elephante AI',
     description: 'Your personal AI stylist. Tap to get curated outfit recommendations tailored to your style.',
+    descriptionAr: 'منسّقك الذكي الشخصي. اضغط للحصول على اقتراحات إطلالات تناسب أسلوبك.',
     targetId: 'tour-ai-stylist',
     preferredPlacement: 'bottom',
   },
   {
     id: 'profile',
     title: 'Your Profile',
+    titleAr: 'ملفك الشخصي',
     description: 'Tap your name to view your style profile, saved looks, and personal preferences.',
+    descriptionAr: 'اضغط اسمك لعرض ملف الأناقة، الإطلالات المحفوظة، والتفضيلات الشخصية.',
     targetId: 'tour-profile',
     preferredPlacement: 'bottom',
   },
   {
     id: 'closet',
     title: 'Your Closet',
+    titleAr: 'خزانتك',
     description: 'Browse and manage your wardrobe archive, every outfit organized and curated.',
+    descriptionAr: 'تصفح وأدر أرشيف خزانتك، كل إطلالة منظمة ومختارة بعناية.',
     targetId: 'tour-closet',
     preferredPlacement: 'left',
   },
   {
     id: 'search',
     title: 'Search',
+    titleAr: 'البحث',
     description: 'Search for any outfit by style, occasion, color, or vibe. Try "business casual" or "wedding".',
+    descriptionAr: 'ابحث عن أي إطلالة حسب الأسلوب أو المناسبة أو اللون أو الإحساس.',
     targetId: 'tour-search',
     preferredPlacement: 'bottom',
   },
 ]
 
 export default function IntroTour({ onDone }: { onDone: () => void }) {
+  const { isAr } = useLocale()
   const [step, setStep] = useState(0)
   const [visible, setVisible] = useState(false)
   const [targetRect, setTargetRect] = useState<DOMRect | null>(null)
@@ -194,8 +206,12 @@ export default function IntroTour({ onDone }: { onDone: () => void }) {
         }}
         onClick={event => event.stopPropagation()}
       >
-        <p className="text-white text-[13px] font-semibold tracking-wide mb-1.5">{current.title}</p>
-        <p className="text-zinc-400 text-[12px] leading-relaxed mb-4">{current.description}</p>
+        <p className="text-white text-[13px] font-semibold tracking-wide mb-1.5" dir={isAr ? 'rtl' : 'ltr'}>
+          {isAr ? current.titleAr : current.title}
+        </p>
+        <p className="text-zinc-400 text-[12px] leading-relaxed mb-4" dir={isAr ? 'rtl' : 'ltr'}>
+          {isAr ? current.descriptionAr : current.description}
+        </p>
         <div className="flex items-center justify-between">
           <div className="flex gap-1.5">
             {STEPS.map((_, index) => (
@@ -215,13 +231,13 @@ export default function IntroTour({ onDone }: { onDone: () => void }) {
               onClick={finish}
               className="text-zinc-600 text-[11px] hover:text-zinc-400 transition-colors"
             >
-              Skip
+              {isAr ? 'تخطي' : 'Skip'}
             </button>
             <button
               onClick={next}
               className="bg-white text-black text-[11px] font-bold px-4 py-1.5 rounded-full hover:bg-zinc-200 transition-colors"
             >
-              {step < STEPS.length - 1 ? 'Next' : 'Done'}
+              {step < STEPS.length - 1 ? (isAr ? 'التالي' : 'Next') : (isAr ? 'تم' : 'Done')}
             </button>
           </div>
         </div>

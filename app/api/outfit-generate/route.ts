@@ -71,7 +71,8 @@ export async function POST(req: NextRequest) {
   if (!rl.ok) return NextResponse.json({ error: 'Too many requests' }, { status: 429, headers: { 'Retry-After': String(rl.retryAfter) } })
 
   try {
-    const { query, gender, skin_tone, body_shape, height, style_pref } = await req.json()
+    const { query, gender, skin_tone, body_shape, height, style_pref, language } = await req.json()
+    const responseLanguage = language === 'ar' ? 'Arabic' : 'English'
     if (!query) return NextResponse.json({ error: 'query required' }, { status: 400 })
 
     const userProfile = [
@@ -88,7 +89,7 @@ export async function POST(req: NextRequest) {
         { role: 'system', content: SYSTEM },
         {
           role: 'user',
-          content: `User request: "${query}"\n\nUSER PROFILE:\n${userProfile}\n\nBuild an outfit that directly answers the request AND flatters this user's body shape and skin tone. Return ONLY raw JSON starting with {`,
+          content: `User request: "${query}"\n\nUSER PROFILE:\n${userProfile}\n\nBuild an outfit that directly answers the request AND flatters this user's body shape and skin tone. Write all user-facing outfit text in ${responseLanguage}. Return ONLY raw JSON starting with {`,
         },
       ],
       { maxTokens: 1000, temperature: 0.75 },

@@ -100,7 +100,8 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { query, name, gender, skin_tone, body_shape, height, style_pref, outfits, history } = body
+    const { query, name, gender, skin_tone, body_shape, height, style_pref, outfits, history, language } = body
+    const responseLanguage = language === 'ar' ? 'Arabic' : 'English'
     if (!query || typeof query !== 'string') return NextResponse.json({ error: 'query required' }, { status: 400 })
 
     // history: Array<{role:'user'|'assistant', content:string}> — prior conversation turns
@@ -125,7 +126,7 @@ export async function POST(req: NextRequest) {
           ...priorTurns,
           {
             role: 'user',
-            content: `CLIENT PROFILE:\n${userProfile}\n\nClient asks: "${query}"`,
+            content: `CLIENT PROFILE:\n${userProfile}\n\nClient asks: "${query}"\n\nRespond in ${responseLanguage}.`,
           },
         ],
         { maxTokens: 400, temperature: 0.7 },
@@ -197,6 +198,8 @@ Use the profile above to filter and rank outfits. Prioritise colours that flatte
 
 OUTFIT CATALOG:
 ${catalog || 'No outfits available.'}
+
+Respond in ${responseLanguage} for all user-facing text fields.
 
 Respond with ONLY a raw JSON object (no markdown):
 {

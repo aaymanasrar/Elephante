@@ -35,6 +35,7 @@ interface AiSearchFlowParams {
   userHeight: string
   userSkinTone: string
   userStylePref: string
+  language?: 'en' | 'ar'
 }
 
 export function useAiSearchFlow({
@@ -50,9 +51,19 @@ export function useAiSearchFlow({
   userHeight,
   userSkinTone,
   userStylePref,
+  language = 'en',
 }: AiSearchFlowParams) {
   const [isThinking, setIsThinking] = useState(false)
   const [aiStatus, setAiStatus] = useState('Reading the room...')
+  const isAr = language === 'ar'
+  const statusCopy = {
+    searching: isAr ? 'جارٍ البحث في الأرشيف...' : 'Searching archive...',
+    curating: isAr ? 'جارٍ تنسيق الإطلالة...' : 'Curating for you...',
+    fallbackBanner: isAr ? 'هذه الإطلالة التي نسّقتها لك.' : "Here's what I put together for you.",
+    clarify: isAr
+      ? 'قطعة جميلة نقدر ننسقها. ما المناسبة؟ رسمي، كاجوال، أو سهرة؟'
+      : 'Great piece to work with! What are you dressing for — formal, casual, a night out?',
+  }
   const [aiContext, setAiContext] = useState<AiContext | null>(null)
   const [finalBanner, setFinalBanner] = useState<{ text: string; vibe: string; colors?: BannerColor[] } | null>(null)
   const [generatedOutfit, setGeneratedOutfit] = useState<GeneratedOutfit>(null)
@@ -125,7 +136,7 @@ export function useAiSearchFlow({
     if (!isNaturalQuery(query)) {
       setAiContext(null)
       setChatHistory([])
-      setAiStatus('Searching archive...')
+      setAiStatus(statusCopy.searching)
       const timer = setTimeout(() => {
         if (activeQueryRef.current === query) setIsThinking(false)
       }, 600)
@@ -133,13 +144,13 @@ export function useAiSearchFlow({
     }
     const controller = new AbortController()
     setIsThinking(true)
-    setAiStatus('Searching archive...')
+    setAiStatus(statusCopy.searching)
     if (isNewQuery) setAiContext(null)
 
     const timer = setTimeout(async () => {
       if (!isActiveQuery()) return
 
-      setAiStatus('Curating for you...')
+      setAiStatus(statusCopy.curating)
 
       try {
         const data = await requestOutfitSearch({
@@ -152,6 +163,7 @@ export function useAiSearchFlow({
           userHeight,
           userSkinTone,
           userStylePref,
+          language,
         }, controller.signal)
 
         if (!isActiveQuery()) return
@@ -202,7 +214,7 @@ export function useAiSearchFlow({
           if (!bannerAlreadySet) {
             const owned = query.replace(/^(i have|i own|i('ve| ve) got|i got|i'?m wearing|wearing my|i wear)\s+/i, '').trim()
             setFinalBanner({
-              text: context.response || `Great piece to work with! What are you dressing for — formal, casual, a night out?`,
+              text: context.response || statusCopy.clarify,
               vibe: context.vibe || owned,
             })
           }
@@ -221,6 +233,7 @@ export function useAiSearchFlow({
           userHeight,
           userSkinTone,
           userStylePref,
+          language,
         }, controller.signal)
 
         if (!isActiveQuery() || !generation.outfit) return
@@ -228,7 +241,7 @@ export function useAiSearchFlow({
         setGeneratedOutfit(generation)
         const bannerText = generation.outfit.skin_tone_analysis || generation.outfit.pro_tip || ''
         if (!isActiveQuery()) return
-        setFinalBanner({ text: bannerText || "Here's what I put together for you.", vibe: generation.outfit.style || '' })
+        setFinalBanner({ text: bannerText || statusCopy.fallbackBanner, vibe: generation.outfit.style || '' })
 
         const { data: { user } } = await supabase.auth.getUser()
         if (!user || !isActiveQuery()) return
@@ -278,6 +291,11 @@ export function useAiSearchFlow({
     userHeight,
     userSkinTone,
     userStylePref,
+    language,
+    statusCopy.searching,
+    statusCopy.curating,
+    statusCopy.clarify,
+    statusCopy.fallbackBanner,
   ])
 
   return {

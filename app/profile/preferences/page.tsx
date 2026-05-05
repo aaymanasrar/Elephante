@@ -5,49 +5,83 @@ import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import LoadingScreen from '@/app/components/LoadingScreen'
+import { useLocale } from '@/lib/locale-context'
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
 const SKIN_TONES = [
-  { id: 'light',  color: '#FFE0BD', label: 'Light'  },
-  { id: 'medium', color: '#D2B48C', label: 'Medium' },
-  { id: 'tan',    color: '#AF8154', label: 'Tan'    },
-  { id: 'dark',   color: '#5C3816', label: 'Deep'   },
+  { id: 'light',  color: '#FFE0BD', label: 'Light', labelAr: 'فاتحة' },
+  { id: 'medium', color: '#D2B48C', label: 'Medium', labelAr: 'متوسطة' },
+  { id: 'tan',    color: '#AF8154', label: 'Tan', labelAr: 'سمراء' },
+  { id: 'dark',   color: '#5C3816', label: 'Deep', labelAr: 'داكنة' },
 ]
 
 const SKIN_UNDERTONES = [
-  { id: 'cool',    label: 'Cool',    hint: 'pink · blue · red'       },
-  { id: 'neutral', label: 'Neutral', hint: 'mix of both'             },
-  { id: 'warm',    label: 'Warm',    hint: 'yellow · peach · gold'   },
+  { id: 'cool',    label: 'Cool', labelAr: 'باردة', hint: 'pink · blue · red', hintAr: 'وردي · أزرق · أحمر' },
+  { id: 'neutral', label: 'Neutral', labelAr: 'محايدة', hint: 'mix of both', hintAr: 'مزيج بينهما' },
+  { id: 'warm',    label: 'Warm', labelAr: 'دافئة', hint: 'yellow · peach · gold', hintAr: 'أصفر · خوخي · ذهبي' },
 ]
 
 const HEIGHTS = [
-  { id: 'short',   label: 'Short',   sub: "Under 5'7\""    },
-  { id: 'average', label: 'Average', sub: "5'7\" – 6'0\""  },
-  { id: 'tall',    label: 'Tall',    sub: "Over 6'0\""     },
+  { id: 'short',   label: 'Short', labelAr: 'قصير', sub: "Under 5'7\"", subAr: 'أقل من 170 سم' },
+  { id: 'average', label: 'Average', labelAr: 'متوسط', sub: "5'7\" – 6'0\"", subAr: '170 - 183 سم' },
+  { id: 'tall',    label: 'Tall', labelAr: 'طويل', sub: "Over 6'0\"", subAr: 'أكثر من 183 سم' },
 ]
 
 const BODY_SHAPES = [
-  { id: 'slim',     label: 'Slim',     sub: 'Lean build' },
-  { id: 'athletic', label: 'Athletic', sub: 'Toned'      },
-  { id: 'average',  label: 'Average',  sub: 'Medium'     },
-  { id: 'stocky',   label: 'Stocky',   sub: 'Solid'      },
-  { id: 'heavy',    label: 'Heavy',    sub: 'Large'      },
+  { id: 'slim',     label: 'Slim', labelAr: 'نحيف', sub: 'Lean build', subAr: 'بنية نحيلة' },
+  { id: 'athletic', label: 'Athletic', labelAr: 'رياضي', sub: 'Toned', subAr: 'مشدود' },
+  { id: 'average',  label: 'Average', labelAr: 'متوسط', sub: 'Medium', subAr: 'متوسط' },
+  { id: 'stocky',   label: 'Stocky', labelAr: 'ممتلئ', sub: 'Solid', subAr: 'صلب' },
+  { id: 'heavy',    label: 'Heavy', labelAr: 'ثقيل', sub: 'Large', subAr: 'كبير' },
 ]
 
 const COLOR_PALETTES = [
-  { id: 'neutral',  label: 'Neutral',      colors: ['#F5F5DC', '#D3D3D3', '#FFFFFF', '#8B7355'] },
-  { id: 'dark',     label: 'Dark / Moody', colors: ['#000000', '#2F4F4F', '#000080', '#363636'] },
-  { id: 'pastel',   label: 'Soft / Pastel',colors: ['#FFB6C1', '#ADD8E6', '#E6E6FA', '#FFE4E1'] },
-  { id: 'colorful', label: 'Vibrant',      colors: ['#FF4500', '#32CD32', '#FFD700', '#4169E1'] },
+  { id: 'neutral',  label: 'Neutral', labelAr: 'محايد', colors: ['#F5F5DC', '#D3D3D3', '#FFFFFF', '#8B7355'] },
+  { id: 'dark',     label: 'Dark / Moody', labelAr: 'داكن / هادئ', colors: ['#000000', '#2F4F4F', '#000080', '#363636'] },
+  { id: 'pastel',   label: 'Soft / Pastel', labelAr: 'ناعم / باستيل', colors: ['#FFB6C1', '#ADD8E6', '#E6E6FA', '#FFE4E1'] },
+  { id: 'colorful', label: 'Vibrant', labelAr: 'زاهي', colors: ['#FF4500', '#32CD32', '#FFD700', '#4169E1'] },
 ]
 
 const OCCASIONS = [
-  { id: 'Business Casual', label: 'Business Casual' },
-  { id: 'Smart Casual',    label: 'Smart Casual'    },
-  { id: 'Traditional',     label: 'Traditional'     },
-  { id: 'Formal',          label: 'Formal'          },
-  { id: 'Streetwear',      label: 'Streetwear'      },
+  { id: 'Business Casual', label: 'Business Casual', labelAr: 'كاجوال أعمال' },
+  { id: 'Smart Casual',    label: 'Smart Casual', labelAr: 'كاجوال أنيق' },
+  { id: 'Traditional',     label: 'Traditional', labelAr: 'تقليدي' },
+  { id: 'Formal',          label: 'Formal', labelAr: 'رسمي' },
+  { id: 'Streetwear',      label: 'Streetwear', labelAr: 'ستريتوير' },
 ]
+
+const preferencesCopy = {
+  en: {
+    cancel: 'Cancel',
+    preferences: 'Preferences',
+    gender: 'Gender',
+    male: 'Male',
+    female: 'Female',
+    skinTone: 'Skin Tone',
+    undertone: 'Undertone',
+    height: 'Height',
+    bodyShape: 'Body Shape',
+    aesthetics: 'Aesthetics',
+    lifestyle: 'Lifestyle',
+    updating: 'Updating...',
+    save: 'Save Preferences',
+  },
+  ar: {
+    cancel: 'إلغاء',
+    preferences: 'التفضيلات',
+    gender: 'النوع',
+    male: 'رجالي',
+    female: 'نسائي',
+    skinTone: 'لون البشرة',
+    undertone: 'الدرجة الداخلية',
+    height: 'الطول',
+    bodyShape: 'شكل الجسم',
+    aesthetics: 'الذوق',
+    lifestyle: 'نمط الحياة',
+    updating: 'جارٍ التحديث...',
+    save: 'حفظ التفضيلات',
+  },
+} as const
 
 // ─── Particle Canvas ──────────────────────────────────────────────────────────
 function ParticleCanvas() {
@@ -117,6 +151,8 @@ function ParticleCanvas() {
 // ─── Preferences ──────────────────────────────────────────────────────────────
 export default function Preferences() {
   const router = useRouter()
+  const { isAr } = useLocale()
+  const t = isAr ? preferencesCopy.ar : preferencesCopy.en
   const [loading, setLoading]   = useState(true)
   const [saving, setSaving]     = useState(false)
   const [gender, setGender]     = useState('')
@@ -176,25 +212,25 @@ export default function Preferences() {
   if (loading) return <LoadingScreen />
 
   // shared class strings
-  const sectionTitle = "text-[10px] uppercase tracking-[0.25em] text-zinc-500 mb-5"
-  const cardBase = "p-3 rounded-xl border text-center transition-all duration-300 text-xs font-semibold uppercase tracking-wider"
+  const sectionTitle = `text-[10px] text-zinc-500 mb-5 ${isAr ? '' : 'uppercase tracking-[0.25em]'}`
+  const cardBase = `p-3 rounded-xl border text-center transition-all duration-300 text-xs font-semibold ${isAr ? '' : 'uppercase tracking-wider'}`
   const cardOn   = "bg-white text-black border-white"
   const cardOff  = "bg-zinc-900/50 text-zinc-500 border-zinc-800 hover:border-zinc-600 hover:text-zinc-300"
 
   return (
-    <div className="min-h-screen bg-black text-white relative">
+    <div className="min-h-screen bg-black text-white relative" dir={isAr ? 'rtl' : 'ltr'}>
       <ParticleCanvas />
 
       {/* ── Sticky header ── */}
       <div className="sticky top-0 z-20 bg-black/80 backdrop-blur-sm border-b border-zinc-900 px-5 py-4 flex justify-between items-center">
         <button
           onClick={() => router.back()}
-          className="text-zinc-600 text-[10px] uppercase tracking-[0.3em] hover:text-white transition-colors min-h-[44px] flex items-center"
+          className={`text-zinc-600 text-[10px] hover:text-white transition-colors min-h-[44px] flex items-center ${isAr ? '' : 'uppercase tracking-[0.3em]'}`}
         >
-          Cancel
+          {t.cancel}
         </button>
-        <h1 className="text-[11px] font-bold tracking-[0.3em] uppercase text-zinc-400">
-          Preferences
+        <h1 className={`text-[11px] font-bold text-zinc-400 ${isAr ? '' : 'tracking-[0.3em] uppercase'}`}>
+          {t.preferences}
         </h1>
         <div className="w-14" />
       </div>
@@ -204,16 +240,16 @@ export default function Preferences() {
 
           {/* Gender */}
         <section>
-          <p className={sectionTitle}>Gender</p>
+          <p className={sectionTitle}>{t.gender}</p>
           <div className="flex gap-3">
             {[
-              { id: 'male',   label: 'Male'   },
-              { id: 'female', label: 'Female' },
+              { id: 'male',   label: t.male   },
+              { id: 'female', label: t.female },
             ].map(opt => (
               <button
                 key={opt.id}
                 onClick={() => setGender(opt.id)}
-                className={`flex-1 py-4 rounded-xl border text-[11px] font-bold uppercase tracking-[0.2em] transition-all duration-300 ${
+                className={`flex-1 py-4 rounded-xl border text-[11px] font-bold transition-all duration-300 ${isAr ? '' : 'uppercase tracking-[0.2em]'} ${
                   gender === opt.id ? cardOn : cardOff
                 }`}
               >
@@ -225,7 +261,7 @@ export default function Preferences() {
 
         {/* Skin Tone */}
         <section>
-          <p className={sectionTitle}>Skin Tone</p>
+          <p className={sectionTitle}>{t.skinTone}</p>
           <div className="flex justify-between px-1">
             {SKIN_TONES.map((tone) => (
               <button
@@ -241,10 +277,10 @@ export default function Preferences() {
                   }`}
                   style={{ backgroundColor: tone.color }}
                 />
-                <span className={`text-[9px] uppercase tracking-widest transition-colors ${
+                <span className={`text-[9px] transition-colors ${isAr ? '' : 'uppercase tracking-widest'} ${
                   skinTone === tone.id ? 'text-white' : 'text-zinc-700 group-hover:text-zinc-400'
                 }`}>
-                  {tone.label}
+                  {isAr ? tone.labelAr : tone.label}
                 </span>
               </button>
             ))}
@@ -253,7 +289,7 @@ export default function Preferences() {
 
         {/* Skin Undertone */}
         <section>
-          <p className={sectionTitle}>Undertone</p>
+          <p className={sectionTitle}>{t.undertone}</p>
           <div className="flex gap-2.5">
             {SKIN_UNDERTONES.map((u) => (
               <button
@@ -263,8 +299,8 @@ export default function Preferences() {
                   skinUndertone === u.id ? cardOn : cardOff
                 }`}
               >
-                <div className="font-bold text-[11px]">{u.label}</div>
-                <div className="text-[9px] opacity-60 mt-0.5">{u.hint}</div>
+                <div className="font-bold text-[11px]">{isAr ? u.labelAr : u.label}</div>
+                <div className="text-[9px] opacity-60 mt-0.5">{isAr ? u.hintAr : u.hint}</div>
               </button>
             ))}
           </div>
@@ -272,7 +308,7 @@ export default function Preferences() {
 
         {/* Height */}
         <section>
-          <p className={sectionTitle}>Height</p>
+          <p className={sectionTitle}>{t.height}</p>
           <div className="grid grid-cols-3 gap-2.5">
             {HEIGHTS.map((h) => (
               <button
@@ -280,8 +316,8 @@ export default function Preferences() {
                 onClick={() => setHeight(h.id)}
                 className={`${cardBase} ${height === h.id ? cardOn : cardOff}`}
               >
-                <div className="font-bold text-[11px]">{h.label}</div>
-                <div className="text-[9px] opacity-60 mt-0.5">{h.sub}</div>
+                <div className="font-bold text-[11px]">{isAr ? h.labelAr : h.label}</div>
+                <div className="text-[9px] opacity-60 mt-0.5">{isAr ? h.subAr : h.sub}</div>
               </button>
             ))}
           </div>
@@ -289,7 +325,7 @@ export default function Preferences() {
 
         {/* Body Shape */}
         <section>
-          <p className={sectionTitle}>Body Shape</p>
+          <p className={sectionTitle}>{t.bodyShape}</p>
           <div className="grid grid-cols-3 gap-2.5">
             {BODY_SHAPES.map((b) => (
               <button
@@ -297,8 +333,8 @@ export default function Preferences() {
                 onClick={() => setBodyShape(b.id)}
                 className={`${cardBase} ${bodyShape === b.id ? cardOn : cardOff}`}
               >
-                <div className="font-bold text-[11px]">{b.label}</div>
-                <div className="text-[9px] opacity-60 mt-0.5">{b.sub}</div>
+                <div className="font-bold text-[11px]">{isAr ? b.labelAr : b.label}</div>
+                <div className="text-[9px] opacity-60 mt-0.5">{isAr ? b.subAr : b.sub}</div>
               </button>
             ))}
           </div>
@@ -306,7 +342,7 @@ export default function Preferences() {
 
         {/* Aesthetics */}
         <section>
-          <p className={sectionTitle}>Aesthetics</p>
+          <p className={sectionTitle}>{t.aesthetics}</p>
           <div className="flex flex-col gap-2.5">
             {COLOR_PALETTES.map((p) => {
               const isSelected = selectedPalettes.includes(p.id)
@@ -320,8 +356,8 @@ export default function Preferences() {
                       : 'bg-zinc-950 border-zinc-900 hover:border-zinc-700'
                   }`}
                 >
-                  <span className={`text-[11px] uppercase tracking-[0.18em] ${isSelected ? 'text-white' : 'text-zinc-500'}`}>
-                    {p.label}
+                  <span className={`text-[11px] ${isAr ? '' : 'uppercase tracking-[0.18em]'} ${isSelected ? 'text-white' : 'text-zinc-500'}`}>
+                    {isAr ? p.labelAr : p.label}
                   </span>
                   <div className="flex items-center gap-2">
                     <div className="flex -space-x-2">
@@ -345,7 +381,7 @@ export default function Preferences() {
 
         {/* Occasions */}
         <section>
-          <p className={sectionTitle}>Lifestyle</p>
+          <p className={sectionTitle}>{t.lifestyle}</p>
           <div className="flex flex-wrap gap-2">
             {OCCASIONS.map((occ) => {
               const isSelected = selectedOccasions.includes(occ.id)
@@ -353,13 +389,13 @@ export default function Preferences() {
                 <button
                   key={occ.id}
                   onClick={() => toggleOccasion(occ.id)}
-                  className={`px-4 py-2 rounded-full border text-[10px] font-semibold uppercase tracking-widest transition-all duration-300 min-h-[40px] ${
+                  className={`px-4 py-2 rounded-full border text-[10px] font-semibold transition-all duration-300 min-h-[40px] ${isAr ? '' : 'uppercase tracking-widest'} ${
                     isSelected
                       ? 'bg-white text-black border-white shadow-[0_0_14px_rgba(255,255,255,0.2)]'
                       : 'bg-transparent text-zinc-500 border-zinc-800 hover:border-zinc-600 hover:text-zinc-300'
                   }`}
                 >
-                  {occ.label}
+                  {isAr ? occ.labelAr : occ.label}
                 </button>
               )
             })}
@@ -373,9 +409,9 @@ export default function Preferences() {
         <button
           onClick={handleSave}
           disabled={saving}
-          className="w-full max-w-sm mx-auto flex items-center justify-center h-12 bg-white text-black rounded-full font-bold text-[10px] uppercase tracking-[0.3em] hover:bg-zinc-200 transition-all active:scale-95 disabled:opacity-40"
+          className={`w-full max-w-sm mx-auto flex items-center justify-center h-12 bg-white text-black rounded-full font-bold text-[10px] hover:bg-zinc-200 transition-all active:scale-95 disabled:opacity-40 ${isAr ? '' : 'uppercase tracking-[0.3em]'}`}
         >
-          {saving ? 'Updating...' : 'Save Preferences'}
+          {saving ? t.updating : t.save}
         </button>
       </div>
     </div>

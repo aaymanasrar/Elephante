@@ -20,6 +20,7 @@ export default function FeedHeader({
   onOpenProfile,
 }: FeedHeaderProps) {
   const { isAr } = useLocale()
+  const profileLabel = `@${displayName}`
 
   return (
     <>
@@ -54,10 +55,13 @@ export default function FeedHeader({
           onClick={isSearching ? onGoHome : onOpenAiStylist}
           className="cursor-pointer pointer-events-auto font-bold uppercase text-zinc-500 hover:text-white transition-all duration-300 active:scale-95"
           aria-label={isSearching ? 'Back to home feed' : 'Open AI Stylist'}
+          dir="ltr"
+          translate="no"
           style={{
             letterSpacing: isSearching ? '0.3em' : '0.4em',
             fontSize: isSearching ? '11px' : '15px',
             fontFamily: 'var(--font-display, inherit)',
+            unicodeBidi: 'isolate',
             transition: 'font-size 500ms cubic-bezier(0.4,0,0.2,1), letter-spacing 500ms cubic-bezier(0.4,0,0.2,1), color 200ms',
           }}
         >
@@ -73,10 +77,14 @@ export default function FeedHeader({
             transform: isSearching ? 'scale(0.95)' : 'scale(1)',
             pointerEvents: isSearching ? 'none' : 'auto',
           }}
-          aria-label={`View profile for @${displayName}`}
+          aria-label={isAr ? `افتح حساب ${displayName}` : `View profile for @${displayName}`}
         >
-          <span className="text-zinc-500 text-[10px] uppercase tracking-[0.2em] font-medium group-hover:text-zinc-200 transition-colors duration-200">
-            @{displayName}
+          <span
+            className={`text-zinc-500 text-[10px] font-medium group-hover:text-zinc-200 transition-colors duration-200 ${isAr ? 'tracking-normal' : 'uppercase tracking-[0.2em]'}`}
+            dir="ltr"
+            style={{ fontFamily: 'inherit', unicodeBidi: 'isolate' }}
+          >
+            {profileLabel}
           </span>
           <div className="h-[1px] w-0 bg-white/50 group-hover:w-full transition-all duration-300" />
         </button>

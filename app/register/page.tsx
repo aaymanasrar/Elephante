@@ -72,8 +72,8 @@ export default function Register() {
   const router = useRouter()
 
   useEffect(() => {
-    const locale = (navigator.language || 'en').toLowerCase()
-    if (locale.startsWith('ar')) setLang('ar')
+    const stored = localStorage.getItem('elephante_lang')
+    if (stored === 'ar' || stored === 'en') setLang(stored)
   }, [])
 
   // Check email

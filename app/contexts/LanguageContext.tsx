@@ -233,13 +233,10 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   const [lang, setLangState] = useState<Lang>('en')
 
   useEffect(() => {
-    // Read from localStorage first, fall back to device language
+    // Keep language explicit: only use the saved app choice.
     const stored = localStorage.getItem('elephante_lang') as Lang | null
     if (stored === 'en' || stored === 'ar') {
       setLangState(stored)
-    } else {
-      const locale = (navigator.language || 'en').toLowerCase()
-      if (locale.startsWith('ar')) setLangState('ar')
     }
   }, [])
 

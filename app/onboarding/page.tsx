@@ -75,7 +75,7 @@ export default function Onboarding() {
       <div className="min-h-screen bg-black text-white flex items-center justify-center">
         <ParticleCanvas />
         <div className="relative z-10">
-          <LoadingSpinner text="Loading Onboarding..." />
+          <LoadingSpinner text={isAr ? 'جارٍ تحميل الإعداد...' : 'Loading Onboarding...'} />
         </div>
       </div>
     )

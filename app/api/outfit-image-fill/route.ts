@@ -101,32 +101,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (!generatedBuffer && process.env.GLIF_API_TOKEN) {
-      try {
-        const glifRes = await fetch('https://simple-api.glif.app', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${process.env.GLIF_API_TOKEN}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: 'jyVwcuh2', inputs: [prompt] }),
-          signal: AbortSignal.timeout(60_000),
-        })
-        const glifData = await glifRes.json()
-        if (!glifData.error) {
-          const imageUrl = typeof glifData.output === 'string' ? glifData.output : glifData.outputFull?.value
-          if (imageUrl) {
-            const imgRes = await fetch(imageUrl, { signal: AbortSignal.timeout(20_000) })
-            if (imgRes.ok) {
-              generatedBuffer = Buffer.from(await imgRes.arrayBuffer())
-              generatedContentType = imgRes.headers.get('content-type') || 'image/png'
-              fallbackImageUrl = imageUrl
-            }
-          }
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unknown error'
-        console.warn('[outfit-image-fill] Glif failed:', message)
-      }
-    }
-
     if (!generatedBuffer) {
       const token = optionalEnv('POLLINATIONS_TOKEN')
       const params = new URLSearchParams({

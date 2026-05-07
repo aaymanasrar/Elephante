@@ -126,24 +126,6 @@ async function generateWithDallE3(prompt: string, apiKey: string): Promise<strin
   return downloadImageAsDataUrl(imageUrl, 'DALL-E 3')
 }
 
-// ── Glif (glif.app — community AI workflows, lookbook glif) ──────────────────
-async function generateWithGlif(prompt: string): Promise<string> {
-  const token = process.env.GLIF_API_TOKEN
-  if (!token) throw new Error('GLIF_API_TOKEN not configured')
-
-  const res = await fetch('https://simple-api.glif.app', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: 'fbuG3c9T', inputs: [prompt] }),
-    signal: AbortSignal.timeout(60_000),
-  })
-  const data = await res.json()
-  if (data.error) throw new Error(`Glif error: ${data.error}`)
-  const imageUrl = typeof data.output === 'string' ? data.output : data.outputFull?.value
-  if (!imageUrl) throw new Error('Glif: no image URL in response')
-  return downloadImageAsDataUrl(imageUrl, 'Glif', 20_000)
-}
-
 // ── Pollinations (free, no key needed — token unlocks higher limits) ─────────
 async function generateWithPollinations(prompt: string): Promise<string> {
   const token = process.env.POLLINATIONS_TOKEN
@@ -209,18 +191,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 4. Glif — lookbook multi-angle outfit images
-    if (process.env.GLIF_API_TOKEN) {
-      try {
-        const image = await generateWithGlif(prompt)
-        return NextResponse.json({ image, provider: 'glif-lookbook' })
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unknown error'
-        console.warn('[generate-outfit-image] Glif failed:', message)
-      }
-    }
-
-    // 5. DALL-E 3 — best at following detailed garment/styling descriptions
+    // 4. DALL-E 3 — best at following detailed garment/styling descriptions
     const openAIKeys = getOpenAIKeys()
     if (openAIKeys.length > 0) {
       try {
@@ -245,7 +216,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 6. Pollinations — free fallback (FLUX)
+    // 5. Pollinations — free fallback (FLUX)
     const image = await generateWithPollinations(prompt)
     return NextResponse.json({ image, provider: 'pollinations' })
   } catch (err: unknown) {

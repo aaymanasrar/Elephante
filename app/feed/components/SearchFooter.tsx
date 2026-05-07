@@ -2,56 +2,96 @@
 
 import Image from 'next/image'
 import type { ChangeEvent, ReactNode, RefObject } from 'react'
-import type { WardrobeAttachment, WardrobeTag } from '@/hooks/useWardrobeAttachment'
+import type { WardrobeAttachment } from '@/hooks/useWardrobeAttachment'
 import { useLocale } from '@/lib/locale-context'
+
+type AttachmentAnalysis = {
+  outfit_name?: string
+  pieces?: string[]
+  color_names?: string[]
+  color_scheme?: string
+}
+
+type AttachmentAnalysisMode = 'inventory' | 'rating'
 
 interface SearchFooterProps {
   attachment: WardrobeAttachment | null
+  attachmentAnalysis?: AttachmentAnalysis | null
+  attachmentAnalysisMode?: AttachmentAnalysisMode | null
   clearAttachment: () => void
-  confirmAttachment: () => Promise<void>
   fileInputRef: RefObject<HTMLInputElement | null>
   handleAttachment: (event: ChangeEvent<HTMLInputElement>) => Promise<void>
   inputValue: string
+  isAnalyzingAttachment?: boolean
   isThinking: boolean
   keyboardOffset: number
+  onAnalyzeAttachment?: () => void
   onInputChange: (value: string) => void
-  onTagChange: (id: WardrobeTag['id'], label: string) => void
+  onRateAttachment?: () => void
   placeholderOverlay?: ReactNode
   onSubmit: () => void
 }
 
 export default function SearchFooter({
   attachment,
+  attachmentAnalysis,
+  attachmentAnalysisMode,
   clearAttachment,
-  confirmAttachment,
   fileInputRef,
   handleAttachment,
   inputValue,
+  isAnalyzingAttachment = false,
   isThinking,
   keyboardOffset,
+  onAnalyzeAttachment,
   onInputChange,
-  onTagChange,
+  onRateAttachment,
   placeholderOverlay,
   onSubmit,
 }: SearchFooterProps) {
   const { isAr } = useLocale()
   const copy = isAr ? {
     identifying: 'جارٍ التعرّف...',
-    saving: 'جارٍ الحفظ...',
-    confirmTags: 'تأكيد الوسوم',
+    analyzePhoto: 'حلّل الصورة',
+    analyzingPhoto: 'جارٍ التحليل...',
+    detected: 'ما وجدته',
+    rateOutfit: 'قيّم الإطلالة',
+    ratingOutfit: 'جارٍ التقييم...',
+    rateAgain: 'أعد التقييم',
     removePhoto: 'إزالة صورة الملابس',
     attachPhoto: 'إرفاق صورة ملابس',
     uploadPhoto: 'رفع صورة ملابس',
     search: 'بحث',
   } : {
     identifying: 'Identifying...',
-    saving: 'Saving...',
-    confirmTags: 'Confirm Tags',
+    analyzePhoto: 'Analyze Photo',
+    analyzingPhoto: 'Analyzing...',
+    detected: 'What I see',
+    rateOutfit: 'Rate Outfit',
+    ratingOutfit: 'Rating...',
+    rateAgain: 'Rate Again',
     removePhoto: 'Remove uploaded clothing photo',
     attachPhoto: 'Attach clothing photo',
     uploadPhoto: 'Upload clothing photo',
     search: 'Search',
   }
+  const canUseAttachment = Boolean(attachment?.image_url && !attachment.uploading)
+  const canSubmit = Boolean(inputValue.trim()) || canUseAttachment
+  const detectedPieces = (attachmentAnalysis?.pieces || [])
+    .filter((piece) => piece && !/^null$/i.test(piece.trim()) && !/not visible/i.test(piece))
+    .slice(0, 5)
+  const fallbackTags = attachment?.tags
+    .filter((tag) => tag.label && !['Color', 'Occasion'].includes(tag.label))
+    .map((tag) => tag.label)
+  const visibleDetections = detectedPieces.length ? detectedPieces : (fallbackTags || [])
+  const actionLabel = isAnalyzingAttachment
+    ? (attachmentAnalysisMode === 'rating' ? copy.ratingOutfit : copy.analyzingPhoto)
+    : attachmentAnalysisMode === 'inventory'
+      ? copy.rateOutfit
+      : attachmentAnalysisMode === 'rating'
+        ? copy.rateAgain
+        : copy.analyzePhoto
+  const actionHandler = attachmentAnalysisMode === 'inventory' ? onRateAttachment : onAnalyzeAttachment
 
   return (
     <div
@@ -83,6 +123,8 @@ export default function SearchFooter({
                     <div className="w-3 h-3 border border-white/20 border-t-white/80 rounded-full animate-spin" />
                     <span className="text-zinc-400 text-xs">{copy.identifying}</span>
                   </div>
+                ) : attachment.error ? (
+                  <p className="text-red-400 text-xs leading-snug">{attachment.error}</p>
                 ) : (
                   <p className="text-white text-xs truncate">{attachment.item_name}</p>
                 )}
@@ -98,25 +140,33 @@ export default function SearchFooter({
               </button>
             </div>
 
-            {!attachment.uploading ? (
+            {!attachment.uploading && !attachment.error ? (
               <>
-                <div className="flex flex-wrap gap-2">
-                  {attachment.tags.map((tag) => (
-                    <input
-                      key={tag.id}
-                      value={tag.label}
-                      onChange={(event) => onTagChange(tag.id, event.target.value)}
-                      className="px-3 py-1.5 rounded-full border border-zinc-800 bg-black/20 text-[11px] text-zinc-300 outline-none focus:border-zinc-600"
-                      aria-label={isAr ? `وسم ${tag.id}` : `${tag.id} tag`}
-                    />
-                  ))}
+                <div className="space-y-2">
+                  <p className="text-[8px] uppercase tracking-[0.28em] text-zinc-600">{copy.detected}</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {visibleDetections.length ? visibleDetections.map((label, index) => (
+                      <span key={`${label}-${index}`} className="px-2.5 py-1 rounded-full border border-zinc-800 bg-black/25 text-[10px] text-zinc-300">
+                        {label}
+                      </span>
+                    )) : (
+                      <span className="px-2.5 py-1 rounded-full border border-zinc-800 bg-black/25 text-[10px] text-zinc-500">
+                        {isAr ? 'جاهز للتحليل' : 'Ready to analyze'}
+                      </span>
+                    )}
+                    {attachmentAnalysis?.color_names?.slice(0, 4).map((color) => (
+                      <span key={color} className="px-2.5 py-1 rounded-full border border-zinc-800 bg-black/25 text-[10px] text-zinc-400">
+                        {color}
+                      </span>
+                    ))}
+                  </div>
                 </div>
                 <button
-                  onClick={confirmAttachment}
-                  disabled={attachment.confirming}
-                  className="w-full rounded-full border border-zinc-700 text-zinc-300 text-[10px] uppercase tracking-[0.25em] py-2.5 hover:border-white hover:text-white transition-all disabled:opacity-50"
+                  onClick={actionHandler}
+                  disabled={!canUseAttachment || isAnalyzingAttachment || !actionHandler}
+                  className="w-full rounded-full bg-white text-black text-[10px] uppercase tracking-[0.2em] py-2.5 hover:bg-zinc-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {attachment.confirming ? copy.saving : copy.confirmTags}
+                  {actionLabel}
                 </button>
               </>
             ) : null}
@@ -146,7 +196,7 @@ export default function SearchFooter({
               value={inputValue}
               onChange={(event) => onInputChange(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === 'Enter' && inputValue.trim()) onSubmit()
+                if (event.key === 'Enter' && canSubmit) onSubmit()
               }}
               className={`w-full bg-zinc-950/50 backdrop-blur-md border border-white/10 text-white text-base sm:text-sm rounded-3xl py-4 outline-none focus:ring-2 focus:ring-white/20 focus:border-white/25 transition-[border-color,box-shadow,background-color] duration-300 min-h-[56px] placeholder-transparent shadow-[0_12px_36px_rgba(0,0,0,0.22)] ${isAr ? 'pr-6 pl-14 text-right' : 'pl-6 pr-14 text-left'}`}
               style={inputValue ? { boxShadow: '0 0 24px rgba(255,255,255,0.08), 0 12px 36px rgba(0,0,0,0.22)' } : {}}
@@ -156,7 +206,7 @@ export default function SearchFooter({
               spellCheck={false}
               aria-label={isAr ? 'ابحث عن إطلالات' : 'Search for outfits'}
             />
-            {inputValue.trim() && !isThinking ? (
+            {canSubmit && !isThinking && !isAnalyzingAttachment ? (
               <button
                 onClick={onSubmit}
                 className={`cursor-pointer absolute ${isAr ? 'left-3' : 'right-3'} top-1/2 -translate-y-1/2 w-9 h-9 rounded-2xl bg-white flex items-center justify-center transition-all duration-200 hover:bg-zinc-100 active:scale-90`}

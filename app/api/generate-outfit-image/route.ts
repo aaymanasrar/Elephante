@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
 import { getOpenAIKeys, isOpenAIQuotaError } from '@/lib/openaiKeys'
+import { downloadImageAsDataUrl, generateEdenAIImage, hasEdenAIImageConfig } from '@/lib/edenaiImage'
+import { generateMagnificMysticImage, hasMagnificImageConfig } from '@/lib/magnificImage'
 import { buildCatalogMannequinImagePrompt } from '@/lib/outfitImagePrompt'
 import type { Outfit } from '@/types/outfit'
 
@@ -91,13 +93,7 @@ async function generateWithHiggsfield(prompt: string): Promise<string> {
     if (data.status === 'completed') {
       const imageUrl = data.images?.[0]?.url
       if (!imageUrl) throw new Error('Higgsfield: no image URL in completed response')
-      // Fetch image and return as base64 data URL (consistent with Pollinations)
-      const imgRes = await fetch(imageUrl, { signal: AbortSignal.timeout(15_000) })
-      if (!imgRes.ok) throw new Error('Higgsfield: failed to download generated image')
-      const buf    = await imgRes.arrayBuffer()
-      const base64 = Buffer.from(buf).toString('base64')
-      const mime   = imgRes.headers.get('content-type') || 'image/jpeg'
-      return `data:${mime};base64,${base64}`
+      return downloadImageAsDataUrl(imageUrl, 'Higgsfield', 15_000)
     }
 
     if (data.status === 'failed' || data.status === 'error') {
@@ -127,13 +123,25 @@ async function generateWithDallE3(prompt: string, apiKey: string): Promise<strin
   const imageUrl = response.data?.[0]?.url
   if (!imageUrl) throw new Error('DALL-E 3: no URL in response')
 
-  // Download and convert to base64 (consistent with other providers)
-  const imgRes = await fetch(imageUrl, { signal: AbortSignal.timeout(20_000) })
-  if (!imgRes.ok) throw new Error('DALL-E 3: failed to download image')
-  const buf    = await imgRes.arrayBuffer()
-  const base64 = Buffer.from(buf).toString('base64')
-  const mime   = imgRes.headers.get('content-type') || 'image/jpeg'
-  return `data:${mime};base64,${base64}`
+  return downloadImageAsDataUrl(imageUrl, 'DALL-E 3')
+}
+
+// ── Glif (glif.app — community AI workflows, lookbook glif) ──────────────────
+async function generateWithGlif(prompt: string): Promise<string> {
+  const token = process.env.GLIF_API_TOKEN
+  if (!token) throw new Error('GLIF_API_TOKEN not configured')
+
+  const res = await fetch('https://simple-api.glif.app', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: 'fbuG3c9T', inputs: [prompt] }),
+    signal: AbortSignal.timeout(60_000),
+  })
+  const data = await res.json()
+  if (data.error) throw new Error(`Glif error: ${data.error}`)
+  const imageUrl = typeof data.output === 'string' ? data.output : data.outputFull?.value
+  if (!imageUrl) throw new Error('Glif: no image URL in response')
+  return downloadImageAsDataUrl(imageUrl, 'Glif', 20_000)
 }
 
 // ── Pollinations (free, no key needed — token unlocks higher limits) ─────────
@@ -168,7 +176,29 @@ export async function POST(req: NextRequest) {
     const { outfit, profile } = await req.json()
     const prompt = buildPrompt(outfit, profile)
 
-    // 1. Higgsfield — FLUX Pro, highest quality cinematic fashion
+    // 1. Magnific Mystic — premium high-resolution realism
+    if (hasMagnificImageConfig()) {
+      try {
+        const { dataUrl, model, taskId } = await generateMagnificMysticImage(prompt)
+        return NextResponse.json({ image: dataUrl, provider: 'magnific-mystic', model, taskId })
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error'
+        console.warn('[generate-outfit-image] Magnific failed:', message)
+      }
+    }
+
+    // 2. EdenAI — ByteDance Seedream through the Universal AI endpoint
+    if (hasEdenAIImageConfig()) {
+      try {
+        const { dataUrl, cost, model } = await generateEdenAIImage(prompt)
+        return NextResponse.json({ image: dataUrl, provider: 'edenai-seedream', model, cost })
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error'
+        console.warn('[generate-outfit-image] EdenAI failed:', message)
+      }
+    }
+
+    // 3. Higgsfield — FLUX Pro, highest quality cinematic fashion
     if (process.env.HIGGSFIELD_API_KEY_ID && process.env.HIGGSFIELD_API_KEY_SECRET) {
       try {
         const image = await generateWithHiggsfield(prompt)
@@ -179,7 +209,18 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 2. DALL-E 3 — best at following detailed garment/styling descriptions
+    // 4. Glif — lookbook multi-angle outfit images
+    if (process.env.GLIF_API_TOKEN) {
+      try {
+        const image = await generateWithGlif(prompt)
+        return NextResponse.json({ image, provider: 'glif-lookbook' })
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error'
+        console.warn('[generate-outfit-image] Glif failed:', message)
+      }
+    }
+
+    // 5. DALL-E 3 — best at following detailed garment/styling descriptions
     const openAIKeys = getOpenAIKeys()
     if (openAIKeys.length > 0) {
       try {
@@ -204,11 +245,12 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 3. Pollinations — free fallback (FLUX)
+    // 6. Pollinations — free fallback (FLUX)
     const image = await generateWithPollinations(prompt)
     return NextResponse.json({ image, provider: 'pollinations' })
-  } catch (err: any) {
-    console.error('[generate-outfit-image]', err.message)
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('[generate-outfit-image]', message)
     return NextResponse.json({ error: friendlyError(err) }, { status: 500 })
   }
 }

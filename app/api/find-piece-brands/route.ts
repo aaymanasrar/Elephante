@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { chatWithFallback, extractJSON } from '@/services/aiProviders'
+import { chatWithFallback } from '@/services/aiProviders'
+import { hasPerplexityConfig, parseJSONFromText, runPerplexityProSearch } from '@/services/perplexity'
 
 // Known brand → URL map so AI doesn't hallucinate links
 const BRAND_URLS: Record<string, string> = {
@@ -58,11 +59,69 @@ function resolveBrandUrl(brand: string): string | null {
   return `https://www.google.com/search?q=${encodeURIComponent(brand + ' buy online')}&tbm=shop`
 }
 
+function isHttpUrl(value: unknown): value is string {
+  return typeof value === 'string' && /^https?:\/\//i.test(value)
+}
+
+async function findBrandsWithPerplexity(pieces: string[]) {
+  if (!hasPerplexityConfig()) return null
+
+  try {
+    const result = await runPerplexityProSearch(
+      [
+        {
+          role: 'system',
+          content: `You are a fashion shopping researcher. Use current web results and retailer pages to map garments to real accessible brands. Return only raw JSON.`,
+        },
+        {
+          role: 'user',
+          content: `For each clothing/accessory piece listed, identify one real brand or retailer that currently sells a close match.
+
+Return ONLY a raw JSON array with exactly ${pieces.length} objects in the same order:
+[
+  { "brand": "Brand Name or null", "url": "https://brand or product URL or null" }
+]
+
+Rules:
+- Prefer accessible brands and retailer pages: Uniqlo, Zara, H&M, Nike, Adidas, Massimo Dutti, Mango, COS, Ralph Lauren, Hugo Boss, ASOS, etc.
+- Use web search and fetch URL content when useful.
+- If a piece is "null" or not a real item, return { "brand": null, "url": null }.
+- Do not include markdown or explanations.
+
+Pieces:
+${pieces.map((p, i) => `${i + 1}. ${p}`).join('\n')}`,
+        },
+      ],
+      { maxTokens: 650, searchType: 'pro', temperature: 0.1, timeout: 50_000 },
+    )
+
+    const parsed = parseJSONFromText<Array<Record<string, unknown>>>(result.content, [])
+    if (!parsed.length) return null
+
+    return parsed.slice(0, pieces.length).map((item) => {
+      const brand = typeof item.brand === 'string' && item.brand.toLowerCase() !== 'null'
+        ? item.brand
+        : null
+      const url = isHttpUrl(item.url) ? item.url : (brand ? resolveBrandUrl(brand) : null)
+      return { brand, url }
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    console.warn('[find-piece-brands] Perplexity failed:', message)
+    return null
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { pieces } = await req.json()
     if (!Array.isArray(pieces) || pieces.length === 0) {
       return NextResponse.json({ brands: [] })
+    }
+
+    const perplexityBrands = await findBrandsWithPerplexity(pieces)
+    if (perplexityBrands) {
+      return NextResponse.json({ brands: perplexityBrands, provider: 'perplexity-sonar-pro' })
     }
 
     const prompt = `You are a fashion expert. For each clothing/accessory piece listed, identify the single best-known brand that sells that type of item. Return ONLY a raw JSON array (no markdown, no code blocks) with exactly ${pieces.length} objects in the same order:
@@ -76,7 +135,7 @@ Pieces:
 ${pieces.map((p: string, i: number) => `${i + 1}. ${p}`).join('\n')}`
 
     const response = await chatWithFallback([{ role: 'user', content: prompt }], { maxTokens: 400 })
-    const parsed: Array<{ brand: string | null }> = extractJSON(response.content)
+    const parsed = parseJSONFromText<Array<{ brand: string | null }>>(response.content, [])
 
     const brands = parsed.map((item: { brand: string | null }) => ({
       brand: item.brand || null,

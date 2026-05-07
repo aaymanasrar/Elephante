@@ -5,6 +5,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { requireEnv } from '@/lib/env'
+import { hasPerplexityConfig, parseJSONFromText, runPerplexityProSearch } from '@/services/perplexity'
 
 const supabase = createClient(
   requireEnv('NEXT_PUBLIC_SUPABASE_URL', 'product search'),
@@ -156,11 +157,89 @@ async function fetchFromUniqlo(query: string, gender: string): Promise<Product[]
   } catch { return [] }
 }
 
+function isHttpUrl(value: unknown): value is string {
+  return typeof value === 'string' && /^https?:\/\//i.test(value)
+}
+
+async function fetchFromPerplexity(query: string, gender: string, category?: string): Promise<Product[]> {
+  if (!hasPerplexityConfig()) return []
+
+  try {
+    const result = await runPerplexityProSearch(
+      [
+        {
+          role: 'system',
+          content: `You find currently shoppable fashion products from real retailer pages. Return only raw JSON. Never invent URLs.`,
+        },
+        {
+          role: 'user',
+          content: `Find up to 5 currently shoppable ${gender} fashion products for: "${query}".
+
+Prefer official retailer/product pages that can be purchased online. Use web search and fetch specific product pages when useful.
+
+Return ONLY this JSON array shape:
+[
+  {
+    "name": "Product name",
+    "brand": "Brand",
+    "price": "Price text or empty string",
+    "url": "https://direct product or retailer URL",
+    "image_url": "https://image URL if available, otherwise empty string"
+  }
+]
+
+Rules:
+- Do not include markdown or explanations.
+- URLs must be real http(s) pages found online.
+- If you cannot verify a real shoppable page, return [].`,
+        },
+      ],
+      { maxTokens: 900, searchType: 'pro', temperature: 0.1, timeout: 55_000 },
+    )
+
+    const parsed = parseJSONFromText<Array<Record<string, unknown>>>(result.content, [])
+    const products = parsed
+      .map((item) => {
+        const url = isHttpUrl(item.url) ? item.url : ''
+        if (!url) return null
+
+        return {
+          name:      typeof item.name === 'string' ? item.name : query,
+          brand:     typeof item.brand === 'string' ? item.brand : '',
+          price:     typeof item.price === 'string' ? item.price : '',
+          url,
+          image_url: isHttpUrl(item.image_url) ? item.image_url : '',
+          gender,
+          category:  category || '',
+        }
+      })
+      .filter((product): product is Product => Boolean(product))
+
+    if (products.length) return products
+
+    return result.searchResults.slice(0, 5).map((item) => ({
+      name:      item.title || query,
+      brand:     '',
+      price:     '',
+      url:       item.url,
+      image_url: '',
+      gender,
+      category:  category || '',
+    }))
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    console.warn('[productSearch] Perplexity failed:', message)
+    return []
+  }
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 // Searches for products matching a query + gender.
 // 1. Checks Supabase cache (24h TTL)
 // 2. Falls back to ASOS (primary — covers 900+ brands)
-// 3. Falls back to H&M, then Uniqlo for their specific items
+// 3. Falls back to H&M
+// 4. Falls back to Uniqlo
+// 5. Uses Perplexity Pro Search for live web results when retailer APIs miss
 
 export async function searchProducts(
   query: string,
@@ -187,6 +266,11 @@ export async function searchProducts(
   // 4. If still nothing, try Uniqlo
   if (!products.length) {
     products = await fetchFromUniqlo(cleanedQuery, gender)
+  }
+
+  // 5. If retailer APIs miss, ask Perplexity Pro Search for current product pages
+  if (!products.length) {
+    products = await fetchFromPerplexity(cleanedQuery, gender, category)
   }
 
   // Tag category and save to cache

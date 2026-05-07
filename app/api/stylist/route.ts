@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
 import { optionalEnv } from '@/lib/env'
+import { downloadImageAsDataUrl, generateEdenAIImage, hasEdenAIImageConfig } from '@/lib/edenaiImage'
+import { generateMagnificMysticImage, hasMagnificImageConfig } from '@/lib/magnificImage'
 import { getOpenAIKeys, isOpenAIQuotaError } from '@/lib/openaiKeys'
 import { rateLimit } from '@/lib/rateLimit'
 import { buildCatalogMannequinImagePrompt } from '@/lib/outfitImagePrompt'
@@ -16,6 +18,26 @@ async function generateImage(description: string): Promise<string> {
     extraDetails: ['occasion-based AI stylist outfit visualization'],
   })
 
+  if (hasMagnificImageConfig()) {
+    try {
+      const { dataUrl } = await generateMagnificMysticImage(fullPrompt)
+      return dataUrl
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      console.warn('[stylist] Magnific failed:', message)
+    }
+  }
+
+  if (hasEdenAIImageConfig()) {
+    try {
+      const { dataUrl } = await generateEdenAIImage(fullPrompt)
+      return dataUrl
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      console.warn('[stylist] EdenAI failed:', message)
+    }
+  }
+
   for (const [index, openAiKey] of getOpenAIKeys().entries()) {
     try {
       const client = new OpenAI({ apiKey: openAiKey, timeout: 60_000 })
@@ -29,13 +51,7 @@ async function generateImage(description: string): Promise<string> {
 
       const imageUrl = response.data?.[0]?.url
       if (imageUrl) {
-        const imageResponse = await fetch(imageUrl, { signal: AbortSignal.timeout(20_000) })
-        if (imageResponse.ok) {
-          const buffer = await imageResponse.arrayBuffer()
-          const base64 = Buffer.from(buffer).toString('base64')
-          const mime = imageResponse.headers.get('content-type') || 'image/jpeg'
-          return `data:${mime};base64,${base64}`
-        }
+        return downloadImageAsDataUrl(imageUrl, 'DALL-E 3')
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'

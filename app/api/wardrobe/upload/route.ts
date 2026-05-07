@@ -15,7 +15,7 @@ function getSupabaseClients() {
   }
 }
 
-const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
+const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'])
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 
 const WARDROBE_PROMPT = `You are a fashion AI. Analyse this clothing image and return ONLY a raw JSON object (no markdown, no code blocks):
@@ -41,9 +41,24 @@ async function getAuthenticatedUserId(request: NextRequest, supabaseUrl: string,
   return data.user.id
 }
 
-function extensionForFile(file: File) {
-  if (file.type === 'image/png') return 'png'
-  if (file.type === 'image/webp') return 'webp'
+function inferImageType(file: File) {
+  const explicitType = file.type.toLowerCase()
+  if (explicitType) return explicitType
+
+  const name = file.name.toLowerCase()
+  if (name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'image/jpeg'
+  if (name.endsWith('.png')) return 'image/png'
+  if (name.endsWith('.webp')) return 'image/webp'
+  if (name.endsWith('.heic')) return 'image/heic'
+  if (name.endsWith('.heif')) return 'image/heif'
+  return ''
+}
+
+function extensionForImageType(imageType: string) {
+  if (imageType === 'image/png') return 'png'
+  if (imageType === 'image/webp') return 'webp'
+  if (imageType === 'image/heic') return 'heic'
+  if (imageType === 'image/heif') return 'heif'
   return 'jpg'
 }
 
@@ -61,20 +76,24 @@ async function handleAnalyze(request: NextRequest, userId: string, supabase: Sup
   const file = formData.get('file') as File | null
 
   if (!file) return NextResponse.json({ error: 'No file provided.' }, { status: 400 })
-  if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
-    return NextResponse.json({ error: 'Please upload a JPG, PNG, or WebP image.' }, { status: 400 })
+  const imageType = inferImageType(file)
+  if (!ALLOWED_IMAGE_TYPES.has(imageType)) {
+    return NextResponse.json({ error: 'Please upload a JPG, PNG, WebP, or HEIC image.' }, { status: 400 })
+  }
+  if (file.size === 0) {
+    return NextResponse.json({ error: 'Image file is empty.' }, { status: 400 })
   }
   if (file.size > MAX_UPLOAD_BYTES) {
     return NextResponse.json({ error: 'Image must be 8MB or smaller.' }, { status: 400 })
   }
 
-  const ext = extensionForFile(file)
+  const ext = extensionForImageType(imageType)
   const path = `${userId}/${Date.now()}.${ext}`
   const buffer = Buffer.from(await file.arrayBuffer())
 
   const { error: uploadError } = await supabase.storage
     .from('wardrobe')
-    .upload(path, buffer, { contentType: file.type, upsert: false })
+    .upload(path, buffer, { contentType: imageType, upsert: false })
 
   if (uploadError) {
     throw new Error(`Storage upload failed: ${uploadError.message}`)

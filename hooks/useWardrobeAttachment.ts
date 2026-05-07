@@ -21,6 +21,7 @@ export interface WardrobeAttachment {
   occasion: string
   style_query: string
   tags: WardrobeTag[]
+  error?: string
 }
 
 export function useWardrobeAttachment(userId: string, onStyleQuery: (query: string) => void, onClearSearch: () => void) {
@@ -37,6 +38,7 @@ export function useWardrobeAttachment(userId: string, onStyleQuery: (query: stri
     const file = event.target.files?.[0]
     if (!file) return
 
+    if (attachment?.preview) URL.revokeObjectURL(attachment.preview)
     const preview = URL.createObjectURL(file)
     setAttachment({
       preview,
@@ -55,7 +57,7 @@ export function useWardrobeAttachment(userId: string, onStyleQuery: (query: stri
     try {
       const authHeaders = await getAuthHeaders()
       if (!authHeaders || !userId) {
-        setAttachment(null)
+        setAttachment((prev) => prev ? { ...prev, uploading: false, error: 'Not signed in. Please refresh and try again.' } : null)
         return
       }
 
@@ -70,7 +72,7 @@ export function useWardrobeAttachment(userId: string, onStyleQuery: (query: stri
       const data = await response.json()
 
       if (data.error) {
-        setAttachment(null)
+        setAttachment((prev) => prev ? { ...prev, uploading: false, error: data.error } : null)
         return
       }
 
@@ -87,8 +89,9 @@ export function useWardrobeAttachment(userId: string, onStyleQuery: (query: stri
         style_query: data.style_query || '',
         tags: Array.isArray(data.tags) ? data.tags : [],
       })
-    } catch {
-      setAttachment(null)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Upload failed. Please try again.'
+      setAttachment((prev) => prev ? { ...prev, uploading: false, error: message } : null)
     }
 
     if (fileInputRef.current) fileInputRef.current.value = ''
@@ -117,7 +120,7 @@ export function useWardrobeAttachment(userId: string, onStyleQuery: (query: stri
     try {
       const authHeaders = await getAuthHeaders()
       if (!authHeaders) {
-        setAttachment((previous) => previous ? { ...previous, confirming: false } : previous)
+        setAttachment((previous) => previous ? { ...previous, confirming: false, error: 'Not signed in. Please refresh and try again.' } : previous)
         return
       }
 
@@ -137,14 +140,15 @@ export function useWardrobeAttachment(userId: string, onStyleQuery: (query: stri
 
       const data = await response.json()
       if (data.error) {
-        setAttachment((previous) => previous ? { ...previous, confirming: false } : previous)
+        setAttachment((previous) => previous ? { ...previous, confirming: false, error: data.error } : previous)
         return
       }
 
       setAttachment((previous) => previous ? { ...previous, confirming: false } : previous)
       onStyleQuery(data.style_query || attachment.style_query)
-    } catch {
-      setAttachment((previous) => previous ? { ...previous, confirming: false } : previous)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not save wardrobe item. Please try again.'
+      setAttachment((previous) => previous ? { ...previous, confirming: false, error: message } : previous)
     }
   }
 

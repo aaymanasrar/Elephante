@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import ParticleCanvas from '@/components/ParticleCanvas'
+import { useLocale } from '@/lib/locale-context'
 
 // ─── Translations ─────────────────────────────────────────────────────────────
 const T = {
@@ -13,12 +14,17 @@ const T = {
     username: 'Username',
     email: 'Email Address',
     password: 'Password',
+    confirmPassword: 'Confirm Password',
+    passwordMismatch: 'Passwords do not match',
+    passwordShort: 'Password must be at least 6 characters',
     register: 'Register',
     creating: 'Creating account...',
     usernameTaken: 'Username is already in use',
     usernameAvailable: 'Username is available',
     emailTaken: 'Email is already in use',
     emailAvailable: 'Email is available',
+    registrationFailed: 'Could not create account. Please try again.',
+    checkEmail: 'Account created. Check your email, then log in.',
     haveAccount: 'Already have an account?',
     login: 'Log in',
   },
@@ -27,12 +33,17 @@ const T = {
     username: 'اسم المستخدم',
     email: 'البريد الإلكتروني',
     password: 'كلمة المرور',
+    confirmPassword: 'تأكيد كلمة المرور',
+    passwordMismatch: 'كلمتا المرور غير متطابقتين',
+    passwordShort: 'يجب أن تكون كلمة المرور 6 أحرف على الأقل',
     register: 'إنشاء حساب',
     creating: 'جارٍ إنشاء الحساب...',
     usernameTaken: 'اسم المستخدم مستخدم بالفعل',
     usernameAvailable: 'اسم المستخدم متاح',
     emailTaken: 'البريد الإلكتروني مستخدم بالفعل',
     emailAvailable: 'البريد الإلكتروني متاح',
+    registrationFailed: 'تعذّر إنشاء الحساب. حاول مرة أخرى.',
+    checkEmail: 'تم إنشاء الحساب. تحقق من بريدك الإلكتروني، ثم سجّل الدخول.',
     haveAccount: 'لديك حساب بالفعل؟',
     login: 'تسجيل الدخول',
   },
@@ -60,83 +71,113 @@ function EyeIcon({ hidden }: { hidden: boolean }) {
 
 // ─── Register ─────────────────────────────────────────────────────────────────
 export default function Register() {
+  const { lang, isAr } = useLocale()
   const [fullName, setFullName]       = useState('')
   const [username, setUsername]       = useState('')
   const [email, setEmail]             = useState('')
-  const [password, setPassword]       = useState('')
-  const [loading, setLoading]         = useState(false)
-  const [emailStatus, setEmailStatus] = useState<'checking' | 'available' | 'taken' | null>(null)
-  const [usernameStatus, setUsernameStatus] = useState<'checking' | 'available' | 'taken' | null>(null)
-  const [lang, setLang]               = useState<'en' | 'ar'>('en')
-  const [showPassword, setShowPassword] = useState(false)
+  const [password, setPassword]               = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [loading, setLoading]                 = useState(false)
+  const [emailStatus, setEmailStatus]         = useState<'checking' | 'available' | 'taken' | null>(null)
+  const [usernameStatus, setUsernameStatus]   = useState<'checking' | 'available' | 'taken' | null>(null)
+  const [formError, setFormError]             = useState('')
+  const [showPassword, setShowPassword]       = useState(false)
+  const [showConfirm, setShowConfirm]         = useState(false)
   const router = useRouter()
-
-  useEffect(() => {
-    const stored = localStorage.getItem('elephante_lang')
-    if (stored === 'ar' || stored === 'en') setLang(stored)
-  }, [])
 
   // Check email
   useEffect(() => {
     if (!email || email.length < 3 || !email.includes('@')) { setEmailStatus(null); return }
+    let cancelled = false
     const check = async () => {
       setEmailStatus('checking')
       try {
-        const { data } = await supabase.from('profiles').select('email').eq('email', email).maybeSingle()
-        setEmailStatus(data?.email ? 'taken' : 'available')
-      } catch { setEmailStatus(null) }
+        const response = await fetch('/api/auth/availability', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ field: 'email', value: email }),
+        })
+        const data = await response.json().catch(() => null)
+        if (!cancelled) setEmailStatus(data?.available === true ? 'available' : data?.available === false ? 'taken' : null)
+      } catch {
+        if (!cancelled) setEmailStatus(null)
+      }
     }
     const timer = setTimeout(check, 600)
-    return () => clearTimeout(timer)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
   }, [email])
 
   // Check username
   useEffect(() => {
     if (!username || username.length < 2) { setUsernameStatus(null); return }
+    let cancelled = false
     const check = async () => {
       setUsernameStatus('checking')
       try {
-        const { data } = await supabase.from('profiles').select('username').eq('username', username.toLowerCase()).maybeSingle()
-        setUsernameStatus(data?.username ? 'taken' : 'available')
-      } catch { setUsernameStatus(null) }
+        const response = await fetch('/api/auth/availability', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ field: 'username', value: username }),
+        })
+        const data = await response.json().catch(() => null)
+        if (!cancelled) setUsernameStatus(data?.available === true ? 'available' : data?.available === false ? 'taken' : null)
+      } catch {
+        if (!cancelled) setUsernameStatus(null)
+      }
     }
     const timer = setTimeout(check, 600)
-    return () => clearTimeout(timer)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
   }, [username])
 
   const t    = T[lang]
-  const isAr = lang === 'ar'
+
+  const passwordsMatch = confirmPassword === '' || password === confirmPassword
+  const confirmDirty = confirmPassword.length > 0
 
   const handleRegister = async () => {
-    if (!fullName || !username || !email || !password) return
+    if (!fullName || !username || !email || !password || !confirmPassword) return
     if (emailStatus === 'taken' || usernameStatus === 'taken') return
     if (password.length < 6) return
+    if (password !== confirmPassword) return
 
     setLoading(true)
+    setFormError('')
 
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { data: { full_name: fullName, username: username.toLowerCase() } },
-    })
-
-    if (error) {
-      if (error.message.includes('already registered')) setEmailStatus('taken')
-      setLoading(false)
-      return
-    }
-
-    if (data.user) {
-      await supabase.from('profiles').insert({
-        id: data.user.id,
-        email,
-        username: username.toLowerCase(),
-        updated_at: new Date().toISOString(),
+    try {
+      const response = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fullName, username, email, password }),
       })
-    }
+      const data = await response.json().catch(() => null)
 
-    router.push('/onboarding')
-    setLoading(false)
+      if (!response.ok) {
+        if (data?.field === 'email') setEmailStatus('taken')
+        if (data?.field === 'username') setUsernameStatus('taken')
+        setFormError(data?.field === 'email' ? t.emailTaken : data?.field === 'username' ? t.usernameTaken : data?.error || t.registrationFailed)
+        setLoading(false)
+        return
+      }
+
+      if (data?.session?.access_token && data?.session?.refresh_token) {
+        const { error: sessionError } = await supabase.auth.setSession(data.session)
+        if (sessionError) throw sessionError
+        router.push('/onboarding')
+        return
+      }
+
+      setFormError(t.checkEmail)
+      setLoading(false)
+    } catch {
+      setFormError(t.registrationFailed)
+      setLoading(false)
+    }
   }
 
   // Glow helpers
@@ -193,7 +234,7 @@ export default function Register() {
               type="text"
               placeholder={t.fullName}
               value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
+              onChange={(e) => { setFullName(e.target.value); setFormError('') }}
               disabled={loading}
               autoComplete="name"
               style={{
@@ -210,7 +251,7 @@ export default function Register() {
                 type="text"
                 placeholder={t.username}
                 value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                onChange={(e) => { setUsername(e.target.value); setFormError('') }}
                 disabled={loading}
                 autoComplete="username"
                 style={{
@@ -234,7 +275,7 @@ export default function Register() {
                 type="email"
                 placeholder={t.email}
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => { setEmail(e.target.value); setFormError('') }}
                 disabled={loading}
                 autoComplete="email"
                 style={{
@@ -253,41 +294,86 @@ export default function Register() {
             </div>
 
             {/* Password */}
-            <div className="relative">
-              <input
-                type={showPassword ? 'text' : 'password'}
-                placeholder={t.password}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                disabled={loading}
-                autoComplete="new-password"
-                style={{
-                  boxShadow: password && !loading ? '0 0 24px rgba(255,255,255,0.07)' : 'none',
-                  fontFamily: arabicFont,
-                  textAlign: isAr ? 'right' : 'left',
-                }}
-                className={`${inputBase} border-zinc-800 ${isAr ? 'pl-11' : 'pr-11'}`}
-              />
-              <button
-                type="button"
-                tabIndex={-1}
-                disabled={loading}
-                aria-label={showPassword ? 'Hide password' : 'Show password'}
-                onClick={() => setShowPassword((value) => !value)}
-                className={`absolute top-1/2 -translate-y-1/2 text-zinc-600 transition-colors hover:text-zinc-300 disabled:pointer-events-none ${
-                  isAr ? 'left-3' : 'right-3'
-                }`}
-              >
-                <EyeIcon hidden={showPassword} />
-              </button>
+            <div>
+              <div className="relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder={t.password}
+                  value={password}
+                  onChange={(e) => { setPassword(e.target.value); setFormError('') }}
+                  disabled={loading}
+                  autoComplete="new-password"
+                  style={{
+                    boxShadow: password && !loading ? '0 0 24px rgba(255,255,255,0.07)' : 'none',
+                    fontFamily: arabicFont,
+                    textAlign: isAr ? 'right' : 'left',
+                  }}
+                  className={`${inputBase} border-zinc-800 ${isAr ? 'pl-11' : 'pr-11'}`}
+                />
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  disabled={loading}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  onClick={() => setShowPassword((value) => !value)}
+                  className={`absolute top-1/2 -translate-y-1/2 text-zinc-600 transition-colors hover:text-zinc-300 disabled:pointer-events-none ${isAr ? 'left-3' : 'right-3'}`}
+                >
+                  <EyeIcon hidden={showPassword} />
+                </button>
+              </div>
+              {password.length > 0 && password.length < 6 && !loading && (
+                <p className="text-red-400 text-[11px] mt-1.5 px-1" style={{ fontFamily: arabicFont }}>{t.passwordShort}</p>
+              )}
+            </div>
+
+            {/* Confirm Password */}
+            <div>
+              <div className="relative">
+                <input
+                  type={showConfirm ? 'text' : 'password'}
+                  placeholder={t.confirmPassword}
+                  value={confirmPassword}
+                  onChange={(e) => { setConfirmPassword(e.target.value); setFormError('') }}
+                  disabled={loading}
+                  autoComplete="new-password"
+                  style={{
+                    boxShadow: confirmDirty && passwordsMatch && !loading ? '0 0 24px rgba(34,197,94,0.25)' : confirmDirty && !passwordsMatch && !loading ? '0 0 24px rgba(239,68,68,0.4)' : 'none',
+                    fontFamily: arabicFont,
+                    textAlign: isAr ? 'right' : 'left',
+                  }}
+                  className={`${inputBase} ${confirmDirty ? (passwordsMatch ? 'border-green-500/60' : 'border-red-500/60') : 'border-zinc-800'} ${isAr ? 'pl-11' : 'pr-11'}`}
+                />
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  disabled={loading}
+                  aria-label={showConfirm ? 'Hide password' : 'Show password'}
+                  onClick={() => setShowConfirm((v) => !v)}
+                  className={`absolute top-1/2 -translate-y-1/2 text-zinc-600 transition-colors hover:text-zinc-300 disabled:pointer-events-none ${isAr ? 'left-3' : 'right-3'}`}
+                >
+                  <EyeIcon hidden={showConfirm} />
+                </button>
+              </div>
+              {confirmDirty && !passwordsMatch && !loading && (
+                <p className="text-red-400 text-[11px] mt-1.5 px-1" style={{ fontFamily: arabicFont }}>{t.passwordMismatch}</p>
+              )}
+              {confirmDirty && passwordsMatch && password.length >= 6 && !loading && (
+                <p className="text-green-400 text-[11px] mt-1.5 px-1" style={{ fontFamily: arabicFont }}>✓</p>
+              )}
             </div>
           </div>
+
+          {formError && !loading && (
+            <p className="w-full text-red-400 text-xs mt-4 text-center leading-relaxed" style={{ fontFamily: arabicFont }}>
+              {formError}
+            </p>
+          )}
 
           {/* ── Register button ── */}
           {!loading && (
             <button
               onClick={handleRegister}
-              disabled={emailStatus === 'taken' || usernameStatus === 'taken' || !fullName || !username || !email || !password}
+              disabled={emailStatus === 'checking' || usernameStatus === 'checking' || emailStatus === 'taken' || usernameStatus === 'taken' || !fullName || !username || !email || !password || !confirmPassword || !passwordsMatch || password.length < 6}
               className="w-full bg-white text-black font-bold text-sm py-3.5 rounded-xl hover:bg-zinc-200 transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed mt-5 tracking-wide min-h-[52px]"
               style={{ fontFamily: arabicFont }}
             >

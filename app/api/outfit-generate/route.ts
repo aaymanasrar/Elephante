@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { chatWithFallback, extractJSON } from '@/services/aiProviders'
 import { rateLimit } from '@/lib/rateLimit'
+import { generateEdenAIImage, hasEdenAIImageConfig } from '@/lib/edenaiImage'
+import { generateMagnificMysticImage, hasMagnificImageConfig } from '@/lib/magnificImage'
 import { buildCatalogMannequinImagePrompt } from '@/lib/outfitImagePrompt'
 
 const SYSTEM = `You are Elephante, a sharp AI fashion stylist. First understand exactly what the user needs — the occasion, the item they own, the mood — then build ONE complete outfit that directly answers their request AND is tailored to their body shape and skin tone.
@@ -62,8 +64,35 @@ Rules:
 - Max 4 pieces. Only add outerwear/accessories if they genuinely elevate the look.
 - skin_tone_analysis must be honest. Bold colours on the wrong undertone clash — say so.`
 
+interface GeneratedOutfitForImage {
+  outfit_name?: string | null
+  style?: string | null
+  top_wear?: string | null
+  bottom_wear?: string | null
+  shoes?: string | null
+  accessories?: string | null
+  outerwear?: string | null
+  color_scheme?: string | null
+  key_colors?: string[] | null
+  when_to_wear?: string | null
+  gender?: string | null
+  alternative?: GeneratedOutfitForImage | null
+  skin_tone_match?: boolean
+}
+
 function seedFromQuery(query: string): number {
   return Math.abs([...query].reduce((acc, c) => (acc * 31 + c.charCodeAt(0)) | 0, 0)) % 2147483647
+}
+
+function buildImagePrompt(o: GeneratedOutfitForImage, gender?: string | null): string {
+  return buildCatalogMannequinImagePrompt({
+    gender,
+    pieces: [o.top_wear, o.bottom_wear, o.shoes, o.accessories, o.outerwear],
+    style: o.style || o.outfit_name,
+    colorScheme: o.color_scheme,
+    colors: o.key_colors,
+    extraDetails: [o.when_to_wear],
+  })
 }
 
 export async function POST(req: NextRequest) {
@@ -95,20 +124,12 @@ export async function POST(req: NextRequest) {
       { maxTokens: 1000, temperature: 0.75 },
     )
 
-    const outfit = extractJSON(result.content)
+    const outfit = extractJSON(result.content) as GeneratedOutfitForImage
     outfit.gender = gender || 'male'
 
-    // 2. Build Pollinations URL helper
+    // 2. Build image URLs, preferring Magnific/EdenAI when configured
     const token = process.env.POLLINATIONS_TOKEN
-    function pollinationsUrl(o: any, seed: number): string {
-      const prompt = buildCatalogMannequinImagePrompt({
-        gender: o.gender || outfit.gender,
-        pieces: [o.top_wear, o.bottom_wear, o.shoes, o.accessories, o.outerwear],
-        style: o.style || o.outfit_name,
-        colorScheme: o.color_scheme,
-        colors: o.key_colors,
-        extraDetails: [o.when_to_wear],
-      })
+    function pollinationsUrl(prompt: string, seed: number): string {
       const params = new URLSearchParams({
         width: '512', height: '768',
         nologo: 'true', model: 'flux',
@@ -118,20 +139,45 @@ export async function POST(req: NextRequest) {
       return `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?${params}`
     }
 
-    const image_url = pollinationsUrl(outfit, seedFromQuery(query))
+    async function generatedImageUrl(o: GeneratedOutfitForImage, seed: number): Promise<string> {
+      const prompt = buildImagePrompt(o, o.gender || outfit.gender)
+
+      if (hasMagnificImageConfig()) {
+        try {
+          const { resourceUrl, dataUrl } = await generateMagnificMysticImage(prompt)
+          return resourceUrl || dataUrl
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Unknown error'
+          console.warn('[outfit-generate] Magnific failed:', message)
+        }
+      }
+
+      if (hasEdenAIImageConfig()) {
+        try {
+          const { dataUrl, resourceUrl } = await generateEdenAIImage(prompt)
+          return resourceUrl || dataUrl
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Unknown error'
+          console.warn('[outfit-generate] EdenAI failed:', message)
+        }
+      }
+
+      return pollinationsUrl(prompt, seed)
+    }
+
+    const image_url = await generatedImageUrl(outfit, seedFromQuery(query))
 
     // 3. Build alternative URL if the primary doesn't suit the skin tone
     let alternative_image_url: string | null = null
     if (outfit.alternative && outfit.skin_tone_match === false) {
       outfit.alternative.gender = outfit.gender
-      alternative_image_url = pollinationsUrl(outfit.alternative, seedFromQuery(query + '_alt'))
+      alternative_image_url = await generatedImageUrl(outfit.alternative, seedFromQuery(query + '_alt'))
     }
 
-    // 4. Return URLs directly — browser loads them client-side
-    //    (avoids Vercel's 10s function timeout on server-side image fetching)
     return NextResponse.json({ outfit, image_url, alternative_image_url })
-  } catch (err: any) {
-    console.error('[outfit-generate]', err.message)
-    return NextResponse.json({ error: err.message }, { status: 500 })
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('[outfit-generate]', message)
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }

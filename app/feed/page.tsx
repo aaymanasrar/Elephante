@@ -152,6 +152,73 @@ function GeneratedOutfitImage({
   return <img src={src} alt={alt} className={className} loading="lazy" />
 }
 
+type AttachmentAnalysis = {
+  outfit_name?: string
+  style?: string
+  vibe?: string
+  color_scheme?: string
+  occasions?: string[]
+  pieces?: string[]
+  color_names?: string[]
+  key_colors?: string[]
+  match_score?: number | null
+  skin_tone_feedback?: string
+  overall_verdict?: string
+  why_it_works?: string
+  styling_tip?: string
+}
+
+type FeedChatTurn = { role: 'user' | 'assistant'; content: string }
+type AttachmentAnalysisMode = 'inventory' | 'rating'
+
+function normalizeAnalysisScore(value: unknown) {
+  const score = Number(value)
+  if (!Number.isFinite(score)) return null
+  return Math.max(0, Math.min(100, Math.round(score)))
+}
+
+function visibleAttachmentPieces(analysis: AttachmentAnalysis) {
+  return (analysis.pieces || [])
+    .filter((piece) => piece && !/^null$/i.test(piece.trim()) && !/not visible/i.test(piece))
+}
+
+function buildAttachmentAnalysisMessage(analysis: AttachmentAnalysis, isAr: boolean, mode: AttachmentAnalysisMode) {
+  const score = normalizeAnalysisScore(analysis.match_score)
+  const pieces = visibleAttachmentPieces(analysis)
+  const inventoryLines = [
+    analysis.outfit_name ? `${isAr ? 'الصورة' : 'Photo'}: ${analysis.outfit_name}` : null,
+    pieces.length ? `${isAr ? 'أرى' : 'I see'}: ${pieces.join(isAr ? '، ' : ', ')}` : null,
+    analysis.color_names?.length ? `${isAr ? 'الألوان' : 'Colors'}: ${analysis.color_names.join(isAr ? '، ' : ', ')}` : null,
+    analysis.color_scheme ? `${isAr ? 'اللوحة' : 'Palette'}: ${analysis.color_scheme}` : null,
+    analysis.occasions?.length ? `${isAr ? 'يناسب' : 'Could work for'}: ${analysis.occasions.join(isAr ? '، ' : ', ')}` : null,
+  ].filter((line): line is string => Boolean(line))
+
+  if (mode === 'inventory') {
+    const lines = [
+      ...inventoryLines,
+      analysis.styling_tip ? `${isAr ? 'فكرة تنسيق' : 'Styling idea'}: ${analysis.styling_tip}` : null,
+      isAr ? 'إذا أردت، أستطيع تقييم الإطلالة الآن.' : 'If you want, I can rate the outfit next.',
+    ].filter((line): line is string => Boolean(line))
+
+    return lines.join('\n\n') || (isAr ? 'حللت الصورة، لكن لم أستطع استخراج القطع بوضوح. جرّب صورة أوضح.' : 'I analyzed the photo, but could not clearly identify the pieces. Try a clearer image.')
+  }
+
+  const lines = [
+    ...inventoryLines,
+    score !== null ? (isAr ? `التقييم: ${score}%` : `Rating: ${score}%`) : null,
+    analysis.overall_verdict ? `${isAr ? 'الحكم العام' : 'Overall'}: ${analysis.overall_verdict}` : null,
+    analysis.skin_tone_feedback ? `${isAr ? 'لون البشرة' : 'Skin tone'}: ${analysis.skin_tone_feedback}` : null,
+    analysis.why_it_works ? `${isAr ? 'لماذا تنجح' : 'Why it works'}: ${analysis.why_it_works}` : null,
+    analysis.styling_tip ? `${isAr ? 'نصيحة' : 'Tip'}: ${analysis.styling_tip}` : null,
+  ].filter((line): line is string => Boolean(line))
+
+  return lines.join('\n\n') || (isAr ? 'حللت الصورة، لكن لم أستطع استخراج رأي واضح. جرّب صورة أوضح للإطلالة.' : 'I analyzed the photo, but could not extract a clear verdict. Try a clearer outfit image.')
+}
+
+function isRatingRequest(query: string) {
+  return /\b(rate|rating|score|judge|review)\b/i.test(query) || /تقييم|قيّم|قيم/.test(query)
+}
+
 function FeedContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -167,6 +234,10 @@ function FeedContent() {
   // Chat display state
   const [pendingUserMessage, setPendingUserMessage] = useState('')
   const [chipDisplayMap, setChipDisplayMap] = useState<Record<string, string>>({})
+  const [attachmentAnalysis, setAttachmentAnalysis] = useState<AttachmentAnalysis | null>(null)
+  const [attachmentAnalysisMode, setAttachmentAnalysisMode] = useState<AttachmentAnalysisMode | null>(null)
+  const [attachmentTurns, setAttachmentTurns] = useState<FeedChatTurn[]>([])
+  const [isAnalyzingAttachment, setIsAnalyzingAttachment] = useState(false)
   const prevHistoryLenRef = useRef(0)
   const chatEndRef = useRef<HTMLDivElement>(null)
   const {
@@ -225,22 +296,101 @@ function FeedContent() {
   const {
     attachment,
     clearAttachment,
-    confirmAttachment,
     fileInputRef,
     handleAttachment,
-    updateTag,
   } = useWardrobeAttachment(
     userId,
     (query) => {
+      setAttachmentAnalysis(null)
+      setAttachmentAnalysisMode(null)
+      setAttachmentTurns([])
       setInputValue(query)
       setSearchQuery(query)
     },
     () => {
       setInputValue('')
       setSearchQuery('')
+      setAttachmentAnalysis(null)
+      setAttachmentAnalysisMode(null)
+      setAttachmentTurns([])
       clearActiveSearchState()
     }
   )
+
+  const handleAnalyzeAttachment = useCallback(async (userRequest?: string, mode: AttachmentAnalysisMode = 'rating') => {
+    if (!attachment?.image_url || attachment.uploading) return
+
+    const prompt = userRequest?.trim()
+    const userText = prompt || (
+      mode === 'inventory'
+        ? (isAr ? 'حلّل صورة الملابس المرفقة' : 'Analyze my attached clothing photo')
+        : (isAr ? 'قيّم صورة الإطلالة المرفقة' : 'Rate my attached outfit photo')
+    )
+    const details = [
+      prompt ? `User request: ${prompt}` : null,
+      attachment.item_name ? `Detected item: ${attachment.item_name}` : null,
+      attachment.item_type ? `Detected type: ${attachment.item_type}` : null,
+      attachment.color ? `Detected color: ${attachment.color}` : null,
+      attachment.occasion ? `Detected occasion: ${attachment.occasion}` : null,
+    ].filter(Boolean).join('\n')
+
+    setIsAnalyzingAttachment(true)
+    setAttachmentAnalysis(null)
+    setAttachmentAnalysisMode(mode)
+    setAttachmentTurns([])
+    setPendingUserMessage(userText)
+    setInputValue('')
+    setSearchQuery('')
+    clearActiveSearchState()
+
+    try {
+      const response = await fetch('/api/analyze-outfit-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image_url: attachment.image_url,
+          image_labels: [attachment.item_type || 'attached outfit'],
+          outfit_details: details,
+          skin_tone: userSkinTone || 'medium_neutral',
+          language: lang,
+          mode,
+        }),
+      })
+
+      const data = await response.json()
+      if (data.error) throw new Error(data.error)
+
+      const analysis = data.analysis as AttachmentAnalysis
+      setAttachmentAnalysis(analysis)
+      setAttachmentAnalysisMode(mode)
+      setAttachmentTurns([
+        { role: 'user', content: userText },
+        { role: 'assistant', content: buildAttachmentAnalysisMessage(analysis, isAr, mode) },
+      ])
+    } catch (error) {
+      const message = error instanceof Error ? error.message : (isAr ? 'تعذّر تحليل الصورة.' : 'Could not analyze the photo.')
+      setAttachmentTurns([
+        { role: 'user', content: userText },
+        {
+          role: 'assistant',
+          content: isAr
+            ? `تعذّر تحليل الصورة. ${message}`
+            : `I could not analyze that photo. ${message}`,
+        },
+      ])
+    } finally {
+      setPendingUserMessage('')
+      setIsAnalyzingAttachment(false)
+    }
+  }, [
+    attachment,
+    clearActiveSearchState,
+    isAr,
+    lang,
+    setInputValue,
+    setSearchQuery,
+    userSkinTone,
+  ])
 
   // Clear pending message when chatHistory grows (AI responded)
   useEffect(() => {
@@ -255,21 +405,24 @@ function FeedContent() {
 
   // Auto-scroll to latest message
   useEffect(() => {
-    if (pendingUserMessage || isThinking || chatHistory.length > 0) {
+    if (pendingUserMessage || isThinking || isAnalyzingAttachment || chatHistory.length > 0 || attachmentTurns.length > 0 || attachmentAnalysis) {
       chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
     }
-  }, [chatHistory.length, isThinking, pendingUserMessage, finalBanner])
+  }, [attachmentAnalysis, attachmentTurns.length, chatHistory.length, finalBanner, isAnalyzingAttachment, isThinking, pendingUserMessage])
 
   // Chip tap: show chip label in chat, send full prompt to AI
   const handleChipTap = useCallback((chip: string) => {
     const prompt = buildFollowUpPrompt(chip)
+    setAttachmentAnalysis(null)
+    setAttachmentAnalysisMode(null)
+    setAttachmentTurns([])
     setChipDisplayMap((previous) => ({ ...previous, [prompt]: chip }))
     setPendingUserMessage(chip)
     setInputValue('')
     setSearchQuery(prompt)
   }, [buildFollowUpPrompt, setInputValue, setSearchQuery])
 
-  const boostedIds = aiContext?.intent ? getBoostedOutfits(aiContext.intent) : []
+  const boostedIds = useMemo(() => aiContext?.intent ? getBoostedOutfits(aiContext.intent) : [], [aiContext?.intent])
   const noImageLabel = isAr ? 'لا توجد صورة' : 'No image'
 
   const genderFiltered = useMemo(() => {
@@ -300,6 +453,10 @@ function FeedContent() {
     })
   }, [searchQuery, aiContext, sortedFeed, genderFiltered, boostedIds, userSkinTone, userPalettes, userBodyShape])
 
+  const isAttachmentAnalysisOpen = isAnalyzingAttachment || Boolean(attachmentAnalysis)
+  const isSearchSurfaceOpen = isSearching || isAttachmentAnalysisOpen
+  const visibleChatHistory = attachmentTurns.length > 0 ? attachmentTurns : chatHistory
+
   const translateFeedText = useArabicTranslations([
     ...filteredOutfits.map((outfit) => outfit.style || outfit.aesthetic?.replace(/^(male|female)\s+/i, '') || 'Outfit'),
     ...(generatedOutfit?.outfit ? [
@@ -320,12 +477,15 @@ function FeedContent() {
 
       <FeedHeader
         displayName={displayName}
-        isSearching={isSearching}
+        isSearching={isSearchSurfaceOpen}
         onGoHome={() => {
           setInputValue('')
           setSearchQuery('')
           setPendingUserMessage('')
           setChipDisplayMap({})
+          setAttachmentAnalysis(null)
+          setAttachmentAnalysisMode(null)
+          setAttachmentTurns([])
           clearActiveSearchState()
         }}
         onOpenAiStylist={() => router.push('/ai-stylist')}
@@ -341,17 +501,17 @@ function FeedContent() {
           WebkitOverflowScrolling: 'touch',
         } as React.CSSProperties}
       >
-        {isSearching ? (
+        {isSearchSurfaceOpen ? (
           <div className="px-4 sm:px-6 pb-8 animate-in fade-in slide-in-from-bottom-4 duration-500" style={{ paddingTop: 'calc(max(2rem, env(safe-area-inset-top)) + 60px)' }}>
 
             {/* ── Chat thread ── */}
             <div className="flex flex-col gap-2.5 mb-4">
-              {chatHistory.map((turn, index) => {
-                const isLatestAssistant = turn.role === 'assistant' && index === chatHistory.length - 1 && Boolean(finalBanner)
+              {visibleChatHistory.map((turn, index) => {
+                const isLatestAssistant = turn.role === 'assistant' && index === visibleChatHistory.length - 1 && Boolean(finalBanner) && attachmentTurns.length === 0
                 const displayText = turn.role === 'user'
                   ? (chipDisplayMap[turn.content] ?? turn.content)
                   : turn.content
-                const isFaded = index < chatHistory.length - 2
+                const isFaded = index < visibleChatHistory.length - 2
 
                 return (
                   <div
@@ -363,7 +523,7 @@ function FeedContent() {
                         <img src="/logo.png" alt="" className="w-9 h-9 object-contain" style={{ filter: 'invert(1)', opacity: 1 }} aria-hidden="true" />
                       </div>
                     )}
-                    <div className={`max-w-[78%] px-4 py-2.5 text-[13px] leading-relaxed ${
+                    <div className={`max-w-[78%] px-4 py-2.5 text-[13px] leading-relaxed whitespace-pre-line ${
                       turn.role === 'user'
                         ? 'bg-zinc-800 text-white rounded-2xl rounded-br-sm'
                         : 'bg-zinc-900/80 border border-zinc-800/60 text-zinc-200 rounded-2xl rounded-bl-sm'
@@ -392,7 +552,7 @@ function FeedContent() {
               ) : null}
 
               {/* Clarification chips — shown as quick-reply options */}
-              {!isThinking && aiContext?.needs_clarification ? (
+              {!isThinking && attachmentTurns.length === 0 && aiContext?.needs_clarification ? (
                 <div className="ml-8 flex flex-wrap gap-2 animate-in fade-in duration-500" style={{ animationDelay: '400ms', animationFillMode: 'both' }}>
                   {(isAr ? ['كاجوال أنيق', 'رسمي / عمل', 'نهاية الأسبوع', 'سهرة', 'إطلالة صيفية'] : ['Smart Casual', 'Formal / Work', 'Weekend Casual', 'Night Out', 'Summer Look']).map((chip) => (
                     <button
@@ -407,7 +567,7 @@ function FeedContent() {
               ) : null}
 
               {/* Follow-up chips after a successful response */}
-              {!isThinking && !aiContext?.needs_clarification && chatHistory.length >= 2 && finalBanner && !generatingOutfit ? (
+              {!isThinking && attachmentTurns.length === 0 && !aiContext?.needs_clarification && chatHistory.length >= 2 && finalBanner && !generatingOutfit ? (
                 <div className="ml-8 flex flex-wrap gap-2 animate-in fade-in duration-500" style={{ animationDelay: '1000ms', animationFillMode: 'both' }}>
                   {(isAr ? ['أكثر رسمية', 'أكثر كاجوال', 'ألوان مختلفة', 'نسخة صيفية', 'نسخة للسهرة'] : ['More formal', 'More casual', 'Different colours', 'Summer version', 'Night out version']).map((chip) => (
                     <button
@@ -422,7 +582,7 @@ function FeedContent() {
               ) : null}
 
               {/* Advice mode curate button */}
-              {!isThinking && aiContext?.mode === 'advice' && !generatingOutfit && !generatedOutfit ? (
+              {!isThinking && attachmentTurns.length === 0 && aiContext?.mode === 'advice' && !generatingOutfit && !generatedOutfit ? (
                 <div className="ml-8 animate-in fade-in duration-700" style={{ animationDelay: '1200ms', animationFillMode: 'both' }}>
                   {!curateTriggered ? (
                     <button
@@ -447,7 +607,7 @@ function FeedContent() {
               ) : null}
 
               {/* Typing indicator */}
-              {isThinking ? (
+              {isThinking || isAnalyzingAttachment ? (
                 <div className="flex items-end gap-2">
                   <div className="w-11 h-11 flex items-center justify-center flex-shrink-0">
                     <img src="/logo.png" alt="" className="w-9 h-9 object-contain" style={{ filter: 'invert(1)', opacity: 1 }} aria-hidden="true" />
@@ -466,7 +626,7 @@ function FeedContent() {
             </div>
 
             {/* ── Outfit results ── */}
-            {aiContext?.mode !== 'advice' || generatingOutfit || generatedOutfit ? (
+            {isSearching && (aiContext?.mode !== 'advice' || generatingOutfit || generatedOutfit) ? (
               <>
                 {!isThinking && (filteredOutfits.length > 0 || generatingOutfit || generatedOutfit) ? (
                   <div className="flex items-center gap-3 mb-5">
@@ -573,30 +733,53 @@ function FeedContent() {
 
       <SearchFooter
         attachment={attachment}
+        attachmentAnalysis={attachmentAnalysis}
+        attachmentAnalysisMode={attachmentAnalysisMode}
         clearAttachment={clearAttachment}
-        confirmAttachment={confirmAttachment}
         fileInputRef={fileInputRef}
-        handleAttachment={handleAttachment}
+        handleAttachment={async (event) => {
+          setAttachmentAnalysis(null)
+          setAttachmentAnalysisMode(null)
+          await handleAttachment(event)
+        }}
         inputValue={inputValue}
+        isAnalyzingAttachment={isAnalyzingAttachment}
         isThinking={isThinking}
         keyboardOffset={kbOffset}
+        onAnalyzeAttachment={() => handleAnalyzeAttachment(inputValue, 'inventory')}
+        onRateAttachment={() => handleAnalyzeAttachment(inputValue, 'rating')}
         onInputChange={(value) => {
           setInputValue(value)
+          if (attachment) return
+          if (attachmentAnalysis) setAttachmentAnalysis(null)
+          if (attachmentAnalysisMode) setAttachmentAnalysisMode(null)
+          if (attachmentTurns.length) setAttachmentTurns([])
           if (value === '') {
             setSearchQuery('')
             setPendingUserMessage('')
             setChipDisplayMap({})
+            setAttachmentAnalysis(null)
+            setAttachmentAnalysisMode(null)
+            setAttachmentTurns([])
             clearActiveSearchState()
           }
         }}
         onSubmit={() => {
           const q = inputValue.trim()
+          if (attachment?.image_url && !attachment.uploading) {
+            const shouldRateAttachment = Boolean(attachmentAnalysisMode) || isRatingRequest(q)
+            const mode: AttachmentAnalysisMode = shouldRateAttachment ? 'rating' : 'inventory'
+            void handleAnalyzeAttachment(q, mode)
+            return
+          }
           if (!q) return
+          setAttachmentAnalysis(null)
+          setAttachmentAnalysisMode(null)
+          setAttachmentTurns([])
           setPendingUserMessage(q)
           setSearchQuery(q)
           setInputValue('')
         }}
-        onTagChange={updateTag}
         placeholderOverlay={<SearchPlaceholder active={inputValue.length > 0} />}
       />
     </div>

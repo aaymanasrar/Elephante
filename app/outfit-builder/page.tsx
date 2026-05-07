@@ -18,6 +18,14 @@ interface ZoneItem {
   inputDraft: string
 }
 
+interface OutfitAnalysis {
+  match_score: number
+  skin_tone_feedback?: string
+  overall_verdict?: string
+  why_it_works?: string
+  styling_tip?: string
+}
+
 type ZoneKey = 'top' | 'outerwear' | 'bottom' | 'shoes' | 'accessories'
 
 const ZONES: { key: ZoneKey; label: string; emoji: string; hint: string }[] = [
@@ -51,13 +59,17 @@ const builderCopy = {
     tapZone: 'Tap a zone to style it',
     consulting: 'Consulting AI Stylist...',
     rate: 'Rate This Outfit!',
-    uploadBoth: 'Upload Top + Bottom Photos',
     verdict: 'AI Stylist Verdict',
     match: 'Match',
     strong: 'Absolutely amazing. These pieces were made for each other.',
     weak: 'Hmm. You might want to rethink this combination.',
-    uploadError: 'Upload photos for both Top and Bottom to test the outfit.',
+    uploadPhotoToRate: 'Attach at least one outfit photo to rate it.',
+    uploadError: 'Attach at least one outfit photo to test the look.',
     failed: 'Failed to test outfit match.',
+    overall: 'Overall Outfit',
+    skinTone: 'Skin Tone Match',
+    whyWorks: 'Why it Works',
+    tip: 'Pro Tip',
   },
   ar: {
     back: 'رجوع',
@@ -73,13 +85,17 @@ const builderCopy = {
     tapZone: 'اضغط على جزء لتنسيقه',
     consulting: 'جارٍ استشارة AI Stylist...',
     rate: 'قيّم هذه الإطلالة',
-    uploadBoth: 'ارفع صورة العلوي والسفلي',
-    verdict: 'AI Stylist Verdict',
+    verdict: 'رأي منسق الذكاء الاصطناعي',
     match: 'توافق',
     strong: 'ممتازة جداً. القطع كأنها صنعت لبعضها.',
     weak: 'قد تحتاج إلى إعادة التفكير في هذا التنسيق.',
-    uploadError: 'ارفع صورتي الجزء العلوي والسفلي لاختبار الإطلالة.',
+    uploadPhotoToRate: 'ارفع صورة واحدة على الأقل للإطلالة لتقييمها.',
+    uploadError: 'ارفع صورة واحدة على الأقل لاختبار الإطلالة.',
     failed: 'تعذّر اختبار توافق الإطلالة.',
+    overall: 'الإطلالة بالكامل',
+    skinTone: 'تناسق مع البشرة',
+    whyWorks: 'لماذا تناسبك',
+    tip: 'نصيحة للمظهر',
   },
 } as const
 
@@ -91,6 +107,83 @@ const EMPTY_ZONE = (): ZoneItem => ({
   inputMode: null,
   inputDraft: '',
 })
+
+const MAX_ANALYSIS_IMAGE_EDGE = 1400
+
+function readFileAsDataUrl(file: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = (event) => resolve(String(event.target?.result || ''))
+    reader.onerror = () => reject(reader.error || new Error('Could not read image.'))
+    reader.readAsDataURL(file)
+  })
+}
+
+async function createAnalysisImageDataUrl(file: File) {
+  const fallback = () => readFileAsDataUrl(file)
+  const objectUrl = URL.createObjectURL(file)
+
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const nextImage = new Image()
+      nextImage.onload = () => resolve(nextImage)
+      nextImage.onerror = () => reject(new Error('Could not load image.'))
+      nextImage.src = objectUrl
+    })
+
+    const maxEdge = Math.max(image.naturalWidth, image.naturalHeight)
+    if (!maxEdge) return fallback()
+
+    const scale = Math.min(1, MAX_ANALYSIS_IMAGE_EDGE / maxEdge)
+    const width = Math.max(1, Math.round(image.naturalWidth * scale))
+    const height = Math.max(1, Math.round(image.naturalHeight * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+
+    const context = canvas.getContext('2d')
+    if (!context) return fallback()
+
+    context.fillStyle = '#f7f4ef'
+    context.fillRect(0, 0, width, height)
+    context.drawImage(image, 0, 0, width, height)
+    return canvas.toDataURL('image/jpeg', 0.86)
+  } catch {
+    return fallback()
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
+}
+
+function getAttachedImageEntries(zones: Record<ZoneKey, ZoneItem>) {
+  return ZONES
+    .map((zone) => {
+      const item = zones[zone.key]
+      if (!item.preview) return null
+      return {
+        label: zone.label,
+        imageUrl: item.preview,
+      }
+    })
+    .filter((entry): entry is { label: string; imageUrl: string } => Boolean(entry))
+}
+
+function buildOutfitDetails(zones: Record<ZoneKey, ZoneItem>) {
+  return ZONES
+    .map((zone) => {
+      const item = zones[zone.key]
+      const detail = item.prompt || item.label
+      return detail ? `${zone.label}: ${detail}` : null
+    })
+    .filter((detail): detail is string => Boolean(detail))
+    .join('\n')
+}
+
+function normalizeScore(value: unknown) {
+  const score = Number(value)
+  if (!Number.isFinite(score)) return 0
+  return Math.max(0, Math.min(100, Math.round(score)))
+}
 
 function MannequinSVG({ activeZone, onZoneClick }: {
   activeZone: ZoneKey | null
@@ -311,7 +404,7 @@ export default function OutfitBuilder() {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const fileTargetZoneRef = useRef<ZoneKey | null>(null)
   const [activeZone, setActiveZone] = useState<ZoneKey | null>(null)
-  const [matchScore, setMatchScore] = useState<number | null>(null)
+  const [analysis, setAnalysis] = useState<OutfitAnalysis | null>(null)
   const [matchError, setMatchError] = useState<string | null>(null)
   const [userSkinTone, setUserSkinTone] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -355,29 +448,33 @@ export default function OutfitBuilder() {
     fileInputRef.current?.click()
   }
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const targetZone = fileTargetZoneRef.current || activeZone
     const file = e.target.files?.[0]
+    e.target.value = ''
+
     if (!targetZone || !file) {
-      e.target.value = ''
       fileTargetZoneRef.current = null
       return
     }
-    const reader = new FileReader()
-    reader.onload = (ev) => {
+
+    try {
+      const preview = await createAnalysisImageDataUrl(file)
       patch(targetZone, {
-        preview: ev.target?.result as string,
+        preview,
         file,
         inputMode: null,
         inputDraft: '',
         label: file.name.replace(/\.[^/.]+$/, ''),
       })
-      setMatchScore(null)
+      setAnalysis(null)
       setMatchError(null)
+    } catch (error) {
+      console.error('Failed to prepare outfit photo:', error)
+      setMatchError(copy.failed)
+    } finally {
       fileTargetZoneRef.current = null
     }
-    reader.readAsDataURL(file)
-    e.target.value = ''
   }
 
   const handleConfirm = (key: ZoneKey) => {
@@ -388,62 +485,60 @@ export default function OutfitBuilder() {
     } else {
       patch(key, { prompt: item.inputDraft.trim(), file: null, label: item.inputDraft.trim(), inputMode: null, inputDraft: '' })
     }
-    setMatchScore(null)
+    setAnalysis(null)
     setMatchError(null)
   }
 
   const handleClear = (key: ZoneKey) => {
     patch(key, EMPTY_ZONE())
-    setMatchScore(null)
+    setAnalysis(null)
     setMatchError(null)
   }
 
-  const checkOutfitMatch = async (shirtFile: File, pantsFile: File, userSkinTone: string) => {
+  const checkOutfitMatch = async (
+    imageEntries: Array<{ label: string; imageUrl: string }>,
+    userSkinTone: string,
+    outfitDetails: string,
+  ) => {
     try {
-      const aiUrl = process.env.NEXT_PUBLIC_AI_MODEL_URL
-      if (!aiUrl) throw new Error('Missing NEXT_PUBLIC_AI_MODEL_URL')
-
-      const formData = new FormData()
-      formData.append('shirt_image', shirtFile)
-      formData.append('pants_image', pantsFile)
-      formData.append('skin_tone', userSkinTone || 'medium_neutral')
-
-      const response = await fetch(aiUrl, {
+      const response = await fetch('/api/analyze-outfit-image', {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image_url: imageEntries[0]?.imageUrl,
+          image_urls: imageEntries.map((entry) => entry.imageUrl),
+          image_labels: imageEntries.map((entry) => entry.label),
+          outfit_details: outfitDetails,
+          language: isAr ? 'ar' : 'en',
+          skin_tone: userSkinTone || 'medium_neutral',
+        }),
       })
 
-      const result = await response.json()
-
-      if (result.status === 'success') {
-        console.log(`The AI Match Score is: ${result.match_score}%`)
-        return Number(result.match_score)
-      }
-
-      throw new Error(result.error || 'AI match check failed')
+      const data = await response.json()
+      if (data.error) throw new Error(data.error)
+      return data.analysis as OutfitAnalysis
     } catch (error) {
-      console.error('Failed to connect to the AI brain:', error)
+      console.error('Failed to analyze outfit:', error)
       throw error
     }
   }
 
   const handleTestOutfit = async () => {
-    const shirtFile = zones.top.file
-    const pantsFile = zones.bottom.file
+    const imageEntries = getAttachedImageEntries(zones)
 
-    if (!shirtFile || !pantsFile) {
-      setMatchScore(null)
+    if (imageEntries.length === 0) {
+      setAnalysis(null)
       setMatchError(copy.uploadError)
       return
     }
 
     setIsLoading(true)
-    setMatchScore(null)
+    setAnalysis(null)
     setMatchError(null)
 
     try {
-      const score = await checkOutfitMatch(shirtFile, pantsFile, userSkinTone)
-      setMatchScore(score)
+      const result = await checkOutfitMatch(imageEntries, userSkinTone, buildOutfitDetails(zones))
+      setAnalysis(result)
     } catch (error) {
       setMatchError(error instanceof Error ? error.message : copy.failed)
     } finally {
@@ -452,7 +547,9 @@ export default function OutfitBuilder() {
   }
 
   const filledCount = Object.values(zones).filter((z) => z.preview || z.prompt).length
-  const hasMatchPhotos = Boolean(zones.top.file && zones.bottom.file)
+  const attachedImageCount = getAttachedImageEntries(zones).length
+  const hasAnalyzablePhotos = attachedImageCount > 0
+  const displayedMatchScore = analysis ? normalizeScore(analysis.match_score) : 0
 
   return (
     <div className="min-h-[100dvh] bg-black text-white relative" dir={isAr ? 'rtl' : 'ltr'}>
@@ -534,29 +631,62 @@ export default function OutfitBuilder() {
             </div>
           ))}
 
-          {filledCount >= 2 && (
+          {filledCount > 0 && (
             <button
               onClick={handleTestOutfit}
-              disabled={isLoading}
+              disabled={isLoading || !hasAnalyzablePhotos}
               className="w-full mt-2 py-4 bg-white text-black font-bold text-[10px] uppercase tracking-widest rounded-2xl hover:bg-zinc-100 transition-colors active:scale-[0.98] min-h-[52px] disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              {isLoading ? copy.consulting : hasMatchPhotos ? copy.rate : copy.uploadBoth}
+              {isLoading ? copy.consulting : hasAnalyzablePhotos ? copy.rate : copy.uploadPhotoToRate}
             </button>
           )}
 
-          {matchScore !== null && (
-            <div className="mt-4 p-4 border rounded bg-gray-50 text-center">
-              <h3 className="text-xl font-bold text-gray-950">{copy.verdict}</h3>
+          {analysis && (
+            <div className="mt-4 p-6 border border-zinc-800 rounded-3xl bg-zinc-950/80 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <h3 className="text-[11px] font-bold tracking-[0.4em] text-zinc-500 uppercase text-center mb-6">{copy.verdict}</h3>
 
-              <p className="text-3xl font-extrabold text-blue-600 mt-2">
-                {matchScore}% {copy.match}
-              </p>
+              <div className="flex flex-col items-center mb-8">
+                <div className="relative w-24 h-24 flex items-center justify-center">
+                  <svg className="w-full h-full -rotate-90">
+                    <circle cx="48" cy="48" r="44" stroke="currentColor" strokeWidth="4" fill="transparent" className="text-zinc-900" />
+                    <circle cx="48" cy="48" r="44" stroke="currentColor" strokeWidth="4" fill="transparent" className="text-white transition-all duration-1000 ease-out"
+                      style={{ strokeDasharray: `${2 * Math.PI * 44}`, strokeDashoffset: `${2 * Math.PI * 44 * (1 - displayedMatchScore / 100)}` }}
+                    />
+                  </svg>
+                  <span className="absolute text-2xl font-light text-white">{displayedMatchScore}%</span>
+                </div>
+                <p className="text-[10px] uppercase tracking-[0.3em] text-zinc-400 mt-3">{copy.match}</p>
+              </div>
 
-              <p className="mt-2 text-gray-600">
-                {matchScore > 75
-                  ? copy.strong
-                  : copy.weak}
-              </p>
+              <div className="space-y-6">
+                {analysis.overall_verdict && (
+                  <div>
+                    <p className="text-[9px] uppercase tracking-[0.2em] text-zinc-600 mb-2">{copy.overall}</p>
+                    <p className="text-xs text-zinc-300 leading-relaxed">{analysis.overall_verdict}</p>
+                  </div>
+                )}
+
+                {analysis.skin_tone_feedback && (
+                  <div>
+                    <p className="text-[9px] uppercase tracking-[0.2em] text-zinc-600 mb-2">{copy.skinTone}</p>
+                    <p className="text-xs text-zinc-300 leading-relaxed italic">{analysis.skin_tone_feedback}</p>
+                  </div>
+                )}
+
+                {analysis.why_it_works && (
+                  <div>
+                    <p className="text-[9px] uppercase tracking-[0.2em] text-zinc-600 mb-2">{copy.whyWorks}</p>
+                    <p className="text-xs text-zinc-400 leading-relaxed">{analysis.why_it_works}</p>
+                  </div>
+                )}
+
+                {analysis.styling_tip && (
+                  <div className="bg-white/5 rounded-2xl p-4 border border-white/10">
+                    <p className="text-[9px] uppercase tracking-[0.2em] text-zinc-500 mb-2">{copy.tip}</p>
+                    <p className="text-xs text-zinc-200 leading-relaxed font-medium">{analysis.styling_tip}</p>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Cormorant, Montserrat, Noto_Naskh_Arabic } from "next/font/google";
 import { validateRequiredEnv } from "@/lib/env";
 import { LocaleProvider } from "@/lib/locale-context";
+import LanguageToggle from "@/app/components/LanguageToggle";
 import "./globals.css";
 
 validateRequiredEnv(["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_ANON_KEY"], "the app");
@@ -42,11 +43,13 @@ export const metadata: Metadata = {
   title: "Elephante",
   description: "Your personal stylist, curated for you.",
   icons: { icon: '/icon.png' },
+  verification: { google: 'u_B22qryn0zzzC95c63zi3f1Bm_3ev84PF_sVFtiNac' },
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  maximumScale: 1,
   viewportFit: "cover",
   interactiveWidget: "resizes-content",
 };
@@ -77,6 +80,7 @@ console.error=function(){
       </head>
       <body className={`${geistSans.variable} ${geistMono.variable} ${cormorant.variable} ${montserrat.variable} ${notoNaskhArabic.variable} antialiased`}>
         <LocaleProvider>
+          <LanguageToggle />
           {children}
         </LocaleProvider>
       </body>

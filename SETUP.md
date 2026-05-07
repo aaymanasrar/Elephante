@@ -64,7 +64,8 @@ The AI will create 3 personalized outfits with:
 
 - **Multi-provider AI fallback**: If one AI provider fails, it automatically tries the next
 - **Product search**: Real-time product lookup from retailer APIs (cached for 24h)
-- **Image generation**: Outfit visualizations via Higgsfield (FLUX Pro), DALL-E 3, or Pollinations
+- **Live web research**: Perplexity Sonar Pro Search can fill product and brand gaps with current web results
+- **Image generation**: Outfit visualizations via Magnific Mystic, EdenAI Seedream, Higgsfield (FLUX Pro), DALL-E 3, or Pollinations
 - **Bilingual support**: English and Arabic interface
 - **Row Level Security**: Users can only access their own data
 

@@ -1,9 +1,13 @@
 'use client'
 
-import { useLanguage } from '@/app/contexts/LanguageContext'
+import { usePathname } from 'next/navigation'
+import { useLocale } from '@/lib/locale-context'
 
 export default function LanguageToggle() {
-  const { lang, setLang, isAr } = useLanguage()
+  const pathname = usePathname()
+  const { lang, setLang, isAr } = useLocale()
+
+  if (pathname === '/feed') return null
 
   return (
     <button

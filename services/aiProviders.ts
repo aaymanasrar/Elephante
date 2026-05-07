@@ -37,14 +37,14 @@ const TEXT_PROVIDERS: TextProvider[] = [
     name:    'GoogleAIStudio',
     apiKey:  process.env.GOOGLE_AI_STUDIO_KEY,
     baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
-    model:   'gemini-2.5-flash-preview-04-17',
+    model:   'gemini-1.5-flash',
   },
   {
     // Gemini 2.0 Flash: fast fallback on same Google key pool
     name:    'Gemini',
     apiKey:  process.env.GEMINI_API_KEY,
     baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
-    model:   'gemini-2.0-flash',
+    model:   'gemini-1.5-flash',
   },
   // ── Tier 2: Fast free inference ───────────────────────────────────────────
   {
@@ -204,9 +204,11 @@ export async function chatWithFallback(
 // Tries each vision-capable provider in order, skips any that fail or have no key
 // Order: Groq → GoogleAIStudio → Claude → Gemini → OpenRouter → Mistral → OpenAI
 export async function analyzeImageWithFallback(
-  imageUrl: string,
+  imageUrls: string | string[],
   prompt: string,
 ): Promise<AIResponse> {
+  const urls = Array.isArray(imageUrls) ? imageUrls : [imageUrls]
+  const images = urls.map(parseVisionImage)
   let lastError: Error | null = null
 
   // Helper: OpenAI-compatible vision call
@@ -222,7 +224,7 @@ export async function analyzeImageWithFallback(
       const completion = await client.chat.completions.create({
         model,
         messages: [{ role: 'user', content: [
-          { type: 'image_url', image_url: { url: imageUrl } },
+          ...images.map(image => ({ type: 'image_url' as const, image_url: { url: image.openAIUrl } })),
           { type: 'text', text: prompt },
         ]}],
         max_tokens: 2048,
@@ -236,26 +238,26 @@ export async function analyzeImageWithFallback(
     }
   }
 
-  // 1. Google AI Studio — gemini-2.5-flash: best free vision model for fashion/color analysis
+  // 1. Google AI Studio — gemini-2.5-flash
   if (process.env.GOOGLE_AI_STUDIO_KEY) {
-    const r = await tryOAI(process.env.GOOGLE_AI_STUDIO_KEY, 'https://generativelanguage.googleapis.com/v1beta/openai/', 'gemini-2.5-flash-preview-04-17', 'GoogleAIStudio')
+    const r = await tryOAI(process.env.GOOGLE_AI_STUDIO_KEY, 'https://generativelanguage.googleapis.com/v1beta/openai/', 'gemini-1.5-flash', 'GoogleAIStudio')
     if (r) return r
   }
 
-  // 2. Groq — llama-4-scout (fast, free)
+  // 2. Groq
   if (process.env.GROQ_API_KEY) {
-    const r = await tryOAI(process.env.GROQ_API_KEY, 'https://api.groq.com/openai/v1', 'meta-llama/llama-4-scout-17b-16e-instruct', 'Groq')
+    const r = await tryOAI(process.env.GROQ_API_KEY, 'https://api.groq.com/openai/v1', 'llama-3.2-11b-vision-preview', 'Groq')
     if (r) return r
   }
 
-  // 3. Claude Sonnet — best for nuanced fashion detail extraction
+  // 3. Claude Sonnet
   if (process.env.ANTHROPIC_API_KEY) {
     try {
       const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
       const response = await anthropic.messages.create({
         model: 'claude-sonnet-4-6', max_tokens: 2048,
         messages: [{ role: 'user', content: [
-          { type: 'image', source: { type: 'url', url: imageUrl } },
+          ...images.map(toAnthropicImageBlock),
           { type: 'text',  text: prompt },
         ]}],
       })
@@ -269,11 +271,11 @@ export async function analyzeImageWithFallback(
 
   // 4. Gemini 2.0 Flash
   if (process.env.GEMINI_API_KEY) {
-    const r = await tryOAI(process.env.GEMINI_API_KEY, 'https://generativelanguage.googleapis.com/v1beta/openai/', 'gemini-2.0-flash', 'Gemini')
+    const r = await tryOAI(process.env.GEMINI_API_KEY, 'https://generativelanguage.googleapis.com/v1beta/openai/', 'gemini-1.5-flash', 'Gemini')
     if (r) return r
   }
 
-  // 5. OpenRouter — free vision model
+  // 5. OpenRouter
   if (process.env.OPENROUTER_API_KEY) {
     const r = await tryOAI(
       process.env.OPENROUTER_API_KEY,
@@ -285,13 +287,13 @@ export async function analyzeImageWithFallback(
     if (r) return r
   }
 
-  // 6. Mistral — pixtral (vision specialist)
+  // 6. Mistral
   if (process.env.MISTRAL_API_KEY) {
     const r = await tryOAI(process.env.MISTRAL_API_KEY, 'https://api.mistral.ai/v1', 'pixtral-12b-2409', 'Mistral')
     if (r) return r
   }
 
-  // 7. OpenAI — gpt-4o (strong vision fallback)
+  // 7. OpenAI
   for (const [index, apiKey] of getOpenAIKeys().entries()) {
     const label = index === 0 ? 'OpenAI' : `OpenAIBackup${index + 1}`
     const r = await tryOAI(apiKey, undefined, 'gpt-4o', label)
@@ -299,6 +301,54 @@ export async function analyzeImageWithFallback(
   }
 
   throw lastError ?? new Error('All vision providers failed')
+}
+
+type ParsedVisionImage = {
+  openAIUrl: string
+  anthropicSource:
+    | { type: 'url'; url: string }
+    | { type: 'base64'; media_type: AnthropicMediaType; data: string }
+}
+
+type AnthropicMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
+
+type AnthropicImageBlock = {
+  type: 'image'
+  source: ParsedVisionImage['anthropicSource']
+}
+
+function toAnthropicMediaType(mediaType: string): AnthropicMediaType {
+  const normalized = mediaType.toLowerCase()
+  if (normalized === 'image/png' || normalized === 'image/gif' || normalized === 'image/webp') return normalized
+  return 'image/jpeg'
+}
+
+function parseVisionImage(input: string): ParsedVisionImage {
+  const trimmed = input.trim()
+  const dataMatch = trimmed.match(/^data:(image\/[a-z0-9.+-]+);base64,([\s\S]+)$/i)
+
+  if (dataMatch?.[1] && dataMatch?.[2]) {
+    return {
+      openAIUrl: trimmed,
+      anthropicSource: {
+        type: 'base64',
+        media_type: toAnthropicMediaType(dataMatch[1]),
+        data: dataMatch[2].replace(/\s/g, ''),
+      },
+    }
+  }
+
+  return {
+    openAIUrl: trimmed,
+    anthropicSource: { type: 'url', url: trimmed },
+  }
+}
+
+function toAnthropicImageBlock(image: ParsedVisionImage): AnthropicImageBlock {
+  return {
+    type: 'image',
+    source: image.anthropicSource,
+  }
 }
 
 // Extract JSON from a model response that may include markdown fences or preamble

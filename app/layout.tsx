@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Cormorant, Montserrat, Noto_Naskh_Arabic } from "next/font/google";
 import { validateRequiredEnv } from "@/lib/env";
 import { LocaleProvider } from "@/lib/locale-context";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 validateRequiredEnv(["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_ANON_KEY"], "the app");
@@ -82,6 +83,7 @@ console.error=function(){
         <LocaleProvider>
           {children}
         </LocaleProvider>
+        <Analytics />
       </body>
     </html>
   );

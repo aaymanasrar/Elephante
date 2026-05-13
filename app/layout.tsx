@@ -3,6 +3,7 @@ import { Geist, Geist_Mono, Cormorant, Montserrat, Noto_Naskh_Arabic } from "nex
 import { validateRequiredEnv } from "@/lib/env";
 import { LocaleProvider } from "@/lib/locale-context";
 import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 
 validateRequiredEnv(["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_ANON_KEY"], "the app");
@@ -84,6 +85,7 @@ console.error=function(){
           {children}
         </LocaleProvider>
         <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   );

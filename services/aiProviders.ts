@@ -93,7 +93,7 @@ const TEXT_PROVIDERS: TextProvider[] = [
     name:    'Kimi',
     apiKey:  process.env.KIMI_API_KEY,
     baseURL: 'https://api.moonshot.ai/v1',
-    model:   'kimi-k2.6',
+    model:   'moonshot-v1-8k',
   },
   // ── Tier 3: Paid fallbacks ────────────────────────────────────────────────
   ...getOpenAIKeys().map((apiKey, index) => ({
@@ -197,7 +197,7 @@ export async function chatWithFallback(
     }
   }
 
-  throw lastError ?? new Error('All AI providers failed')
+  throw new Error('AI styling is unavailable right now — please try again in a moment')
 }
 
 // ─── Vision analysis fallback chain ──────────────────────────────────────────

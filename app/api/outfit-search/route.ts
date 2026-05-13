@@ -24,6 +24,81 @@ function isAdviceQuery(query: string): boolean {
   return ADVICE_SIGNALS.some(sig => q.includes(sig))
 }
 
+const FASHION_CONTEXT_SIGNALS = [
+  'outfit', 'fit', 'wear', 'wore', 'wearing', 'dress', 'dressed', 'style', 'styling',
+  'look', 'looks', 'clothes', 'clothing', 'wardrobe', 'closet', 'fashion', 'garment',
+  'shirt', 'tee', 't-shirt', 'top', 'blouse', 'sweater', 'hoodie', 'jacket', 'coat',
+  'blazer', 'suit', 'pants', 'trousers', 'jeans', 'denim', 'shorts', 'skirt',
+  'abaya', 'thobe', 'kandura', 'dress', 'gown', 'shoes', 'sneakers', 'boots',
+  'loafers', 'heels', 'sandals', 'accessories', 'watch', 'belt', 'bag', 'scarf',
+  'formal', 'casual', 'smart casual', 'business', 'office', 'work', 'meeting',
+  'interview', 'wedding', 'party', 'date', 'dinner', 'night out', 'travel',
+  'beach', 'gym', 'festival', 'summer', 'winter', 'spring', 'autumn', 'fall',
+  'hot', 'cold', 'rain', 'modest', 'streetwear', 'quiet luxury', 'old money',
+  'minimalist', 'classic', 'preppy', 'goth', 'y2k', 'vintage', 'skin tone',
+  'body shape', 'slim', 'athletic', 'stocky', 'heavy', 'average',
+  'black', 'white', 'blue', 'navy', 'red', 'green', 'brown', 'beige', 'cream',
+  'grey', 'gray', 'pink', 'purple', 'orange', 'yellow', 'olive', 'camel',
+  'burgundy', 'khaki', 'charcoal', 'ivory', 'tan',
+]
+
+const OBVIOUS_OFF_TOPIC_SIGNALS = [
+  'weather', 'temperature', 'time', 'date today', "today's date", 'capital',
+  'recipe', 'cook', 'pizza', 'burger', 'sushi', 'hotdog', 'football', 'soccer',
+  'score', 'stock', 'bitcoin', 'homework', 'math', 'code', 'javascript',
+  'python', 'movie', 'song', 'music', 'restaurant',
+]
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function matchesSignal(query: string, signal: string) {
+  if (signal.includes(' ') || signal.includes('-')) return query.includes(signal)
+  return new RegExp(`\\b${escapeRegExp(signal)}\\b`, 'i').test(query)
+}
+
+function hasFashionContext(query: string) {
+  const q = query.toLowerCase()
+  return isAdviceQuery(q) || FASHION_CONTEXT_SIGNALS.some((signal) => matchesSignal(q, signal))
+}
+
+function hasExplicitFashionAsk(query: string) {
+  return ['outfit', 'wear', 'style', 'dress', 'fashion', 'look', 'clothes', 'clothing']
+    .some((signal) => matchesSignal(query, signal))
+}
+
+function isOutOfContextQuery(query: string) {
+  const q = query.trim().toLowerCase()
+  if (!q) return false
+  if (OBVIOUS_OFF_TOPIC_SIGNALS.some((signal) => matchesSignal(q, signal)) && !hasExplicitFashionAsk(q)) return true
+  if (hasFashionContext(q)) return false
+  return true
+}
+
+function buildHumorRedirect(query: string, gender?: string, language?: string) {
+  const cleanQuery = query.replace(/\s+/g, ' ').trim().slice(0, 120)
+  const outfitQuery = [
+    `Create a wearable ${gender || 'unisex'} outfit inspired by this joke about an off-topic search: "${cleanQuery}".`,
+    'The joke vibe is "lost in the wrong tab, but made it stylish".',
+    'Make it playful, polished, and clearly related to the joke through color, mood, or one witty accessory, but not a costume.',
+  ].join(' ')
+
+  if (language === 'ar') {
+    return {
+      response: `سألت الخزانة عن "${cleanQuery}" فنظرت لي كأنني طلبت بدلة غوص لاجتماع عمل. خلّينا نحوّلها لإطلالة مرحة بروح: دخلت المكان الغلط، لكن بثقة وأناقة.`,
+      vibe: 'Off-topic chic',
+      outfit_query: outfitQuery,
+    }
+  }
+
+  return {
+    response: `I asked the wardrobe about "${cleanQuery}" and it stared at me like a blazer at a beach party. So I’m turning the detour into a look: confidently lost, suspiciously well-dressed.`,
+    vibe: 'Side quest chic',
+    outfit_query: outfitQuery,
+  }
+}
+
 // ─── System prompts ───────────────────────────────────────────────────────────
 const ADVICE_SYSTEM = `You are Elephante — a world-class personal fashion stylist with deep knowledge of colour theory, brand aesthetics, body proportion, fabric science, and real-world dressing. You give rich, specific advice tailored to the person's exact profile.
 
@@ -108,6 +183,19 @@ export async function POST(req: NextRequest) {
     const priorTurns: Array<{ role: 'user' | 'assistant'; content: string }> = Array.isArray(history) ? history : []
 
     const firstName = (name || 'there').split(' ')[0]
+
+    // ── Off-topic mode: answer with a joke, then generate a joke-inspired outfit ──
+    if (isOutOfContextQuery(query)) {
+      const humor = buildHumorRedirect(query, gender, language)
+      return NextResponse.json({
+        mode: 'humor',
+        intent: 'off-topic detour',
+        response: humor.response,
+        suggestions: [],
+        vibe: humor.vibe,
+        outfit_query: humor.outfit_query,
+      })
+    }
 
     // ── Advice mode: styling knowledge query ──────────────────────────────────
     if (isAdviceQuery(query)) {

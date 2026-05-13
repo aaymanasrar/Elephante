@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import LoadingScreen from '@/app/components/LoadingScreen'
 import IntroTour from '@/app/components/IntroTour'
 import FeedHeader from '@/app/feed/components/FeedHeader'
+import OutfitAnalysisCard from '@/app/feed/components/OutfitAnalysisCard'
 import SearchFooter from '@/app/feed/components/SearchFooter'
 import LoadingSpinner from '@/components/LoadingSpinner'
 import ParticleCanvas from '@/components/ParticleCanvas'
@@ -161,7 +162,10 @@ type AttachmentAnalysis = {
   pieces?: string[]
   color_names?: string[]
   key_colors?: string[]
+  rating_out_of_10?: number | null
   match_score?: number | null
+  proportion_score?: number | null
+  color_harmony_score?: number | null
   skin_tone_feedback?: string
   overall_verdict?: string
   why_it_works?: string
@@ -177,13 +181,26 @@ function normalizeAnalysisScore(value: unknown) {
   return Math.max(0, Math.min(100, Math.round(score)))
 }
 
+function normalizeOutOf10(value: unknown, fallbackScore: number | null) {
+  const score = Number(value)
+  if (Number.isFinite(score)) {
+    const normalized = score > 10 ? score / 10 : score
+    return Math.max(0, Math.min(10, Math.round(normalized * 10) / 10))
+  }
+  return fallbackScore === null ? null : Math.max(0, Math.min(10, Math.round((fallbackScore / 10) * 10) / 10))
+}
+
 function visibleAttachmentPieces(analysis: AttachmentAnalysis) {
   return (analysis.pieces || [])
-    .filter((piece) => piece && !/^null$/i.test(piece.trim()) && !/not visible/i.test(piece))
+    .filter((piece) => {
+      const normalized = piece.trim().toLowerCase()
+      return normalized && !['null', 'none', 'n/a', 'na'].includes(normalized) && !normalized.includes('not visible') && !normalized.includes('not shown')
+    })
 }
 
 function buildAttachmentAnalysisMessage(analysis: AttachmentAnalysis, isAr: boolean, mode: AttachmentAnalysisMode) {
   const score = normalizeAnalysisScore(analysis.match_score)
+  const ratingOutOf10 = normalizeOutOf10(analysis.rating_out_of_10, score)
   const pieces = visibleAttachmentPieces(analysis)
   const inventoryLines = [
     analysis.outfit_name ? `${isAr ? 'الصورة' : 'Photo'}: ${analysis.outfit_name}` : null,
@@ -205,18 +222,14 @@ function buildAttachmentAnalysisMessage(analysis: AttachmentAnalysis, isAr: bool
 
   const lines = [
     ...inventoryLines,
-    score !== null ? (isAr ? `التقييم: ${score}%` : `Rating: ${score}%`) : null,
     analysis.overall_verdict ? `${isAr ? 'الحكم العام' : 'Overall'}: ${analysis.overall_verdict}` : null,
     analysis.skin_tone_feedback ? `${isAr ? 'لون البشرة' : 'Skin tone'}: ${analysis.skin_tone_feedback}` : null,
     analysis.why_it_works ? `${isAr ? 'لماذا تنجح' : 'Why it works'}: ${analysis.why_it_works}` : null,
     analysis.styling_tip ? `${isAr ? 'نصيحة' : 'Tip'}: ${analysis.styling_tip}` : null,
+    ratingOutOf10 !== null ? (isAr ? `التقييم النهائي: ${ratingOutOf10}/10` : `Final rating: ${ratingOutOf10}/10`) : null,
   ].filter((line): line is string => Boolean(line))
 
   return lines.join('\n\n') || (isAr ? 'حللت الصورة، لكن لم أستطع استخراج رأي واضح. جرّب صورة أوضح للإطلالة.' : 'I analyzed the photo, but could not extract a clear verdict. Try a clearer outfit image.')
-}
-
-function isRatingRequest(query: string) {
-  return /\b(rate|rating|score|judge|review)\b/i.test(query) || /تقييم|قيّم|قيم/.test(query)
 }
 
 function FeedContent() {
@@ -238,7 +251,9 @@ function FeedContent() {
   const [attachmentAnalysisMode, setAttachmentAnalysisMode] = useState<AttachmentAnalysisMode | null>(null)
   const [attachmentTurns, setAttachmentTurns] = useState<FeedChatTurn[]>([])
   const [isAnalyzingAttachment, setIsAnalyzingAttachment] = useState(false)
+  const [isDraggingPhoto, setIsDraggingPhoto] = useState(false)
   const prevHistoryLenRef = useRef(0)
+  const dragDepthRef = useRef(0)
   const chatEndRef = useRef<HTMLDivElement>(null)
   const {
     allOutfits,
@@ -291,9 +306,11 @@ function FeedContent() {
     userSkinTone,
     userStylePref,
     language: lang,
+    ready: !loading && !authLoading,
   })
 
   const {
+    attachFile,
     attachment,
     clearAttachment,
     fileInputRef,
@@ -317,22 +334,90 @@ function FeedContent() {
     }
   )
 
+  const attachPhotoFile = useCallback(async (file: File) => {
+    setAttachmentAnalysis(null)
+    setAttachmentAnalysisMode(null)
+    setAttachmentTurns([])
+    await attachFile(file)
+  }, [attachFile])
+
+  useEffect(() => {
+    const firstImageFile = (files: FileList | File[]) => Array.from(files).find((file) => file.type.startsWith('image/')) || null
+    const hasImageFile = (event: DragEvent) => {
+      return Array.from(event.dataTransfer?.items || []).some((item) => item.kind === 'file' && item.type.startsWith('image/'))
+        || Array.from(event.dataTransfer?.files || []).some((file) => file.type.startsWith('image/'))
+    }
+    const clipboardImageFile = (event: ClipboardEvent) => {
+      const file = event.clipboardData?.files ? firstImageFile(event.clipboardData.files) : null
+      if (file) return file
+
+      const item = Array.from(event.clipboardData?.items || []).find((candidate) => candidate.kind === 'file' && candidate.type.startsWith('image/'))
+      return item?.getAsFile() || null
+    }
+
+    const handlePaste = (event: ClipboardEvent) => {
+      const file = clipboardImageFile(event)
+      if (!file) return
+      event.preventDefault()
+      void attachPhotoFile(file)
+    }
+
+    const handleDragEnter = (event: DragEvent) => {
+      if (!hasImageFile(event)) return
+      event.preventDefault()
+      dragDepthRef.current += 1
+      setIsDraggingPhoto(true)
+    }
+
+    const handleDragOver = (event: DragEvent) => {
+      if (!hasImageFile(event)) return
+      event.preventDefault()
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+      setIsDraggingPhoto(true)
+    }
+
+    const handleDragLeave = () => {
+      dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
+      if (dragDepthRef.current === 0) setIsDraggingPhoto(false)
+    }
+
+    const handleDrop = (event: DragEvent) => {
+      if (!hasImageFile(event)) return
+      event.preventDefault()
+      dragDepthRef.current = 0
+      setIsDraggingPhoto(false)
+      const file = event.dataTransfer?.files ? firstImageFile(event.dataTransfer.files) : null
+      if (file) void attachPhotoFile(file)
+    }
+
+    window.addEventListener('paste', handlePaste)
+    window.addEventListener('dragenter', handleDragEnter)
+    window.addEventListener('dragover', handleDragOver)
+    window.addEventListener('dragleave', handleDragLeave)
+    window.addEventListener('drop', handleDrop)
+
+    return () => {
+      window.removeEventListener('paste', handlePaste)
+      window.removeEventListener('dragenter', handleDragEnter)
+      window.removeEventListener('dragover', handleDragOver)
+      window.removeEventListener('dragleave', handleDragLeave)
+      window.removeEventListener('drop', handleDrop)
+    }
+  }, [attachPhotoFile])
+
   const handleAnalyzeAttachment = useCallback(async (userRequest?: string, mode: AttachmentAnalysisMode = 'rating') => {
     if (!attachment?.image_url || attachment.uploading) return
 
     const prompt = userRequest?.trim()
-    const userText = prompt || (
-      mode === 'inventory'
-        ? (isAr ? 'حلّل صورة الملابس المرفقة' : 'Analyze my attached clothing photo')
-        : (isAr ? 'قيّم صورة الإطلالة المرفقة' : 'Rate my attached outfit photo')
-    )
     const details = [
       prompt ? `User request: ${prompt}` : null,
       attachment.item_name ? `Detected item: ${attachment.item_name}` : null,
       attachment.item_type ? `Detected type: ${attachment.item_type}` : null,
+      attachment.pieces.length ? `Detected pieces: ${attachment.pieces.join(', ')}` : null,
       attachment.color ? `Detected color: ${attachment.color}` : null,
       attachment.occasion ? `Detected occasion: ${attachment.occasion}` : null,
     ].filter(Boolean).join('\n')
+    const userText = `📎 ${prompt || (isAr ? 'تحليل الإطلالة' : 'Style Check')}`
 
     setIsAnalyzingAttachment(true)
     setAttachmentAnalysis(null)
@@ -342,6 +427,9 @@ function FeedContent() {
     setInputValue('')
     setSearchQuery('')
     clearActiveSearchState()
+    
+    // Clear attachment AFTER capturing the previewUrl in the userText closure
+    clearAttachment()
 
     try {
       const response = await fetch('/api/analyze-outfit-image', {
@@ -352,6 +440,9 @@ function FeedContent() {
           image_labels: [attachment.item_type || 'attached outfit'],
           outfit_details: details,
           skin_tone: userSkinTone || 'medium_neutral',
+          gender: userGender || undefined,
+          body_shape: userBodyShape || undefined,
+          height_category: userHeight || undefined,
           language: lang,
           mode,
         }),
@@ -384,11 +475,15 @@ function FeedContent() {
     }
   }, [
     attachment,
+    clearAttachment,
     clearActiveSearchState,
     isAr,
     lang,
     setInputValue,
     setSearchQuery,
+    userBodyShape,
+    userGender,
+    userHeight,
     userSkinTone,
   ])
 
@@ -475,6 +570,14 @@ function FeedContent() {
 
       <ParticleCanvas desktopCount={36} mobileCount={24} />
 
+      {isDraggingPhoto ? (
+        <div className="fixed inset-0 z-40 pointer-events-none bg-black/45 backdrop-blur-[2px] flex items-center justify-center px-6">
+          <div className="w-full max-w-sm rounded-[2rem] border border-white/25 bg-zinc-950/75 shadow-[0_0_80px_rgba(255,255,255,0.08)] px-6 py-8 text-center">
+            <p className="text-[10px] uppercase tracking-[0.32em] text-white/85">{isAr ? 'اترك الصورة هنا' : 'Drop photo here'}</p>
+          </div>
+        </div>
+      ) : null}
+
       <FeedHeader
         displayName={displayName}
         isSearching={isSearchSurfaceOpen}
@@ -512,6 +615,27 @@ function FeedContent() {
                   ? (chipDisplayMap[turn.content] ?? turn.content)
                   : turn.content
                 const isFaded = index < visibleChatHistory.length - 2
+
+                // Rating mode: replace the assistant text bubble with the visual card
+                const isAttachmentRatingCard =
+                  attachmentTurns.length > 0 &&
+                  turn.role === 'assistant' &&
+                  index === visibleChatHistory.length - 1 &&
+                  attachmentAnalysisMode === 'rating' &&
+                  attachmentAnalysis != null
+
+                if (isAttachmentRatingCard) {
+                  return (
+                    <div key={index} className="flex items-start gap-2 justify-start">
+                      <div className="w-11 h-11 flex items-center justify-center flex-shrink-0 mt-1">
+                        <img src="/logo.png" alt="" className="w-9 h-9 object-contain" style={{ filter: 'invert(1)', opacity: 1 }} aria-hidden="true" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <OutfitAnalysisCard analysis={attachmentAnalysis} isAr={isAr} />
+                      </div>
+                    </div>
+                  )
+                }
 
                 return (
                   <div
@@ -632,7 +756,11 @@ function FeedContent() {
                   <div className="flex items-center gap-3 mb-5">
                     <div className="h-px bg-zinc-900 flex-1" />
                     <span className="text-zinc-700 text-[9px] uppercase tracking-widest">
-                      {generatingOutfit ? (isAr ? 'جارٍ إنشاء إطلالتك...' : 'Creating your look...') : (isAr ? `${filteredOutfits.length} إطلالة` : `${filteredOutfits.length} outfit${filteredOutfits.length !== 1 ? 's' : ''}`)}
+                      {generatingOutfit
+                        ? (isAr ? 'جارٍ إنشاء إطلالتك...' : 'Creating your look...')
+                        : (generatedOutfit && filteredOutfits.length === 0)
+                          ? (isAr ? 'إطلالة مولّدة' : 'Generated look')
+                          : (isAr ? `${filteredOutfits.length} إطلالة` : `${filteredOutfits.length} outfit${filteredOutfits.length !== 1 ? 's' : ''}`)}
                     </span>
                     <div className="h-px bg-zinc-900 flex-1" />
                   </div>
@@ -665,7 +793,6 @@ function FeedContent() {
                           ) : (
                             <div className="w-full h-full flex items-center justify-center"><span className="text-zinc-800 text-[9px] uppercase tracking-widest">{noImageLabel}</span></div>
                           )}
-                          <span className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-black/60 text-[8px] uppercase tracking-widest text-zinc-400 border border-zinc-800/60">AI</span>
                         </div>
                         {generatedOutfit.outfit?.style || generatedOutfit.outfit?.outfit_name ? (
                           <p className="mt-1.5 text-[9px] uppercase tracking-[0.2em] text-zinc-600 group-hover:text-zinc-400 truncate px-0.5 transition-colors duration-200">
@@ -740,13 +867,15 @@ function FeedContent() {
         handleAttachment={async (event) => {
           setAttachmentAnalysis(null)
           setAttachmentAnalysisMode(null)
+          setAttachmentTurns([])
           await handleAttachment(event)
         }}
+        handleAttachmentFile={attachPhotoFile}
         inputValue={inputValue}
         isAnalyzingAttachment={isAnalyzingAttachment}
         isThinking={isThinking}
         keyboardOffset={kbOffset}
-        onAnalyzeAttachment={() => handleAnalyzeAttachment(inputValue, 'inventory')}
+        onAnalyzeAttachment={() => handleAnalyzeAttachment(inputValue, 'rating')}
         onRateAttachment={() => handleAnalyzeAttachment(inputValue, 'rating')}
         onInputChange={(value) => {
           setInputValue(value)
@@ -767,8 +896,7 @@ function FeedContent() {
         onSubmit={() => {
           const q = inputValue.trim()
           if (attachment?.image_url && !attachment.uploading) {
-            const shouldRateAttachment = Boolean(attachmentAnalysisMode) || isRatingRequest(q)
-            const mode: AttachmentAnalysisMode = shouldRateAttachment ? 'rating' : 'inventory'
+            const mode: AttachmentAnalysisMode = 'rating'
             void handleAnalyzeAttachment(q, mode)
             return
           }

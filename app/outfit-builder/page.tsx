@@ -20,6 +20,9 @@ interface ZoneItem {
 
 interface OutfitAnalysis {
   match_score: number
+  proportion_score: number
+  color_harmony_score: number
+  silhouette_feedback: string
   skin_tone_feedback?: string
   overall_verdict?: string
   why_it_works?: string
@@ -70,6 +73,9 @@ const builderCopy = {
     skinTone: 'Skin Tone Match',
     whyWorks: 'Why it Works',
     tip: 'Pro Tip',
+    proportion: 'Proportion',
+    harmony: 'Color Harmony',
+    silhouette: 'Silhouette & Fit',
   },
   ar: {
     back: 'رجوع',
@@ -96,6 +102,9 @@ const builderCopy = {
     skinTone: 'تناسق مع البشرة',
     whyWorks: 'لماذا تناسبك',
     tip: 'نصيحة للمظهر',
+    proportion: 'التناسق',
+    harmony: 'تناغم الألوان',
+    silhouette: 'الشكل والمقاس',
   },
 } as const
 
@@ -405,8 +414,15 @@ export default function OutfitBuilder() {
   const fileTargetZoneRef = useRef<ZoneKey | null>(null)
   const [activeZone, setActiveZone] = useState<ZoneKey | null>(null)
   const [analysis, setAnalysis] = useState<OutfitAnalysis | null>(null)
+  const [messages, setMessages] = useState<{ role: 'user' | 'assistant', content: string | React.ReactNode }[]>([])
   const [matchError, setMatchError] = useState<string | null>(null)
   const [userSkinTone, setUserSkinTone] = useState('')
+  const [userProfile, setUserProfile] = useState<{
+    gender?: string
+    skin_undertone?: string
+    body_shape?: string
+    height_category?: string
+  }>({})
   const [isLoading, setIsLoading] = useState(false)
   const [zones, setZones] = useState<Record<ZoneKey, ZoneItem>>({
     top:         EMPTY_ZONE(),
@@ -419,22 +435,28 @@ export default function OutfitBuilder() {
   useEffect(() => {
     if (!user) return
 
-    const loadSkinTone = async () => {
+    const loadProfile = async () => {
       const { data, error } = await supabase
         .from('profiles')
-        .select('skin_tone')
+        .select('skin_tone, gender, skin_undertone, body_shape, height_category')
         .eq('id', user.id)
         .single()
 
       if (error) {
-        console.error('Failed to load skin tone:', error)
+        console.error('Failed to load profile:', error)
         return
       }
 
       setUserSkinTone(data?.skin_tone || '')
+      setUserProfile({
+        gender: data?.gender,
+        skin_undertone: data?.skin_undertone,
+        body_shape: data?.body_shape,
+        height_category: data?.height_category,
+      })
     }
 
-    loadSkinTone()
+    loadProfile()
   }, [user])
 
   const patch = (key: ZoneKey, update: Partial<ZoneItem>) => {
@@ -498,6 +520,7 @@ export default function OutfitBuilder() {
   const checkOutfitMatch = async (
     imageEntries: Array<{ label: string; imageUrl: string }>,
     userSkinTone: string,
+    profile: typeof userProfile,
     outfitDetails: string,
   ) => {
     try {
@@ -511,6 +534,10 @@ export default function OutfitBuilder() {
           outfit_details: outfitDetails,
           language: isAr ? 'ar' : 'en',
           skin_tone: userSkinTone || 'medium_neutral',
+          gender: profile.gender,
+          skin_undertone: profile.skin_undertone,
+          body_shape: profile.body_shape,
+          height_category: profile.height_category,
         }),
       })
 
@@ -537,8 +564,35 @@ export default function OutfitBuilder() {
     setMatchError(null)
 
     try {
-      const result = await checkOutfitMatch(imageEntries, userSkinTone, buildOutfitDetails(zones))
+      const result = await checkOutfitMatch(imageEntries, userSkinTone, userProfile, buildOutfitDetails(zones))
       setAnalysis(result)
+      
+      // Build chat sequence
+      const newMessages: typeof messages = [
+        { 
+          role: 'user', 
+          content: (
+            <div className="flex gap-2 flex-wrap">
+              {imageEntries.map((img, i) => (
+                <img key={i} src={img.imageUrl} alt="" className="w-16 h-16 rounded-lg object-cover border border-white/10" />
+              ))}
+            </div>
+          )
+        }
+      ]
+      setMessages(newMessages)
+
+      // Add AI response after a short delay
+      setTimeout(() => {
+        setMessages(prev => [
+          ...prev,
+          { 
+            role: 'assistant', 
+            content: result.overall_verdict || (isAr ? 'إليك تحليلي لإطلالتك...' : 'Here is my analysis of your look...')
+          }
+        ])
+      }, 600)
+
     } catch (error) {
       setMatchError(error instanceof Error ? error.message : copy.failed)
     } finally {
@@ -550,6 +604,8 @@ export default function OutfitBuilder() {
   const attachedImageCount = getAttachedImageEntries(zones).length
   const hasAnalyzablePhotos = attachedImageCount > 0
   const displayedMatchScore = analysis ? normalizeScore(analysis.match_score) : 0
+  const displayedProportionScore = analysis ? normalizeScore(analysis.proportion_score) : 0
+  const displayedHarmonyScore = analysis ? normalizeScore(analysis.color_harmony_score) : 0
 
   return (
     <div className="min-h-[100dvh] bg-black text-white relative" dir={isAr ? 'rtl' : 'ltr'}>
@@ -642,51 +698,128 @@ export default function OutfitBuilder() {
           )}
 
           {analysis && (
-            <div className="mt-4 p-6 border border-zinc-800 rounded-3xl bg-zinc-950/80 animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <h3 className="text-[11px] font-bold tracking-[0.4em] text-zinc-500 uppercase text-center mb-6">{copy.verdict}</h3>
+            <div className="mt-4 flex flex-col gap-5 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              {/* Chat Thread */}
+              <div className="space-y-4">
+                {messages.map((msg, i) => (
+                  <div key={i} className={`flex items-end gap-2.5 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    {msg.role === 'assistant' && (
+                      <div className="w-9 h-9 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center flex-shrink-0 mb-0.5">
+                        <img src="/logo.png" alt="" className="w-6 h-6 object-contain invert" />
+                      </div>
+                    )}
+                    <div className={`max-w-[85%] px-4 py-3 text-[13px] leading-relaxed ${
+                      msg.role === 'user' 
+                        ? 'bg-zinc-800 text-white rounded-2xl rounded-br-sm shadow-lg shadow-black/20' 
+                        : 'bg-zinc-950/90 border border-zinc-800/50 text-zinc-200 rounded-2xl rounded-bl-sm backdrop-blur-sm'
+                    }`}>
+                      {msg.content}
+                    </div>
+                  </div>
+                ))}
 
-              <div className="flex flex-col items-center mb-8">
-                <div className="relative w-24 h-24 flex items-center justify-center">
-                  <svg className="w-full h-full -rotate-90">
-                    <circle cx="48" cy="48" r="44" stroke="currentColor" strokeWidth="4" fill="transparent" className="text-zinc-900" />
-                    <circle cx="48" cy="48" r="44" stroke="currentColor" strokeWidth="4" fill="transparent" className="text-white transition-all duration-1000 ease-out"
-                      style={{ strokeDasharray: `${2 * Math.PI * 44}`, strokeDashoffset: `${2 * Math.PI * 44 * (1 - displayedMatchScore / 100)}` }}
-                    />
-                  </svg>
-                  <span className="absolute text-2xl font-light text-white">{displayedMatchScore}%</span>
+                {isLoading && (
+                  <div className="flex items-end gap-2.5 justify-start">
+                    <div className="w-9 h-9 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center flex-shrink-0">
+                      <img src="/logo.png" alt="" className="w-6 h-6 object-contain invert" />
+                    </div>
+                    <div className="px-4 py-3 rounded-2xl rounded-bl-sm bg-zinc-950/80 border border-zinc-800">
+                      <div className="flex gap-1 items-center">
+                        <span className="w-1.5 h-1.5 rounded-full bg-white/40 animate-bounce" style={{ animationDelay: '0ms' }} />
+                        <span className="w-1.5 h-1.5 rounded-full bg-white/25 animate-bounce" style={{ animationDelay: '150ms' }} />
+                        <span className="w-1.5 h-1.5 rounded-full bg-white/10 animate-bounce" style={{ animationDelay: '300ms' }} />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Detailed Analysis Dashboard (shown after AI initial response) */}
+              {messages.length > 1 && (
+                <div className="p-6 border border-zinc-800/80 rounded-[2.5rem] bg-zinc-950/60 backdrop-blur-md animate-in fade-in slide-in-from-bottom-4 duration-700 delay-500 fill-mode-both shadow-2xl">
+                  <h3 className="text-[10px] font-bold tracking-[0.4em] text-zinc-500 uppercase text-center mb-8">{copy.verdict}</h3>
+
+                  <div className="flex justify-around mb-10">
+                    <div className="flex flex-col items-center">
+                      <div className="relative w-16 h-16 flex items-center justify-center">
+                        <svg className="w-full h-full -rotate-90">
+                          <circle cx="32" cy="32" r="28" stroke="currentColor" strokeWidth="3" fill="transparent" className="text-zinc-900" />
+                          <circle cx="32" cy="32" r="28" stroke="currentColor" strokeWidth="3" fill="transparent" className="text-white transition-all duration-1000 ease-out"
+                            style={{ strokeDasharray: `${2 * Math.PI * 28}`, strokeDashoffset: `${2 * Math.PI * 28 * (1 - displayedMatchScore / 100)}` }}
+                          />
+                        </svg>
+                        <span className="absolute text-sm font-medium text-white">{displayedMatchScore}%</span>
+                      </div>
+                      <p className="text-[8px] uppercase tracking-[0.2em] text-zinc-600 mt-2.5">{copy.match}</p>
+                    </div>
+
+                    <div className="flex flex-col items-center">
+                      <div className="relative w-16 h-16 flex items-center justify-center">
+                        <svg className="w-full h-full -rotate-90">
+                          <circle cx="32" cy="32" r="28" stroke="currentColor" strokeWidth="3" fill="transparent" className="text-zinc-900" />
+                          <circle cx="32" cy="32" r="28" stroke="currentColor" strokeWidth="3" fill="transparent" className="text-zinc-400 transition-all duration-1000 ease-out"
+                            style={{ strokeDasharray: `${2 * Math.PI * 28}`, strokeDashoffset: `${2 * Math.PI * 28 * (1 - displayedProportionScore / 100)}` }}
+                          />
+                        </svg>
+                        <span className="absolute text-sm font-medium text-white">{displayedProportionScore}%</span>
+                      </div>
+                      <p className="text-[8px] uppercase tracking-[0.2em] text-zinc-600 mt-2.5">{copy.proportion}</p>
+                    </div>
+
+                    <div className="flex flex-col items-center">
+                      <div className="relative w-16 h-16 flex items-center justify-center">
+                        <svg className="w-full h-full -rotate-90">
+                          <circle cx="32" cy="32" r="28" stroke="currentColor" strokeWidth="3" fill="transparent" className="text-zinc-900" />
+                          <circle cx="32" cy="32" r="28" stroke="currentColor" strokeWidth="3" fill="transparent" className="text-zinc-500 transition-all duration-1000 ease-out"
+                            style={{ strokeDasharray: `${2 * Math.PI * 28}`, strokeDashoffset: `${2 * Math.PI * 28 * (1 - displayedHarmonyScore / 100)}` }}
+                          />
+                        </svg>
+                        <span className="absolute text-sm font-medium text-white">{displayedHarmonyScore}%</span>
+                      </div>
+                      <p className="text-[8px] uppercase tracking-[0.2em] text-zinc-600 mt-2.5">{copy.harmony}</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-8">
+                    {analysis.skin_tone_feedback && (
+                      <div>
+                        <div className="flex items-center gap-2 mb-3">
+                          <div className="w-1.5 h-1.5 rounded-full bg-zinc-600" />
+                          <p className="text-[9px] uppercase tracking-[0.25em] text-zinc-600">{copy.skinTone}</p>
+                        </div>
+                        <p className="text-xs text-zinc-300 leading-relaxed pl-3.5">{analysis.skin_tone_feedback}</p>
+                      </div>
+                    )}
+
+                    {analysis.silhouette_feedback && (
+                      <div>
+                        <div className="flex items-center gap-2 mb-3">
+                          <div className="w-1.5 h-1.5 rounded-full bg-zinc-600" />
+                          <p className="text-[9px] uppercase tracking-[0.25em] text-zinc-600">{copy.silhouette}</p>
+                        </div>
+                        <p className="text-xs text-zinc-300 leading-relaxed italic pl-3.5">{analysis.silhouette_feedback}</p>
+                      </div>
+                    )}
+
+                    {analysis.why_it_works && (
+                      <div>
+                        <div className="flex items-center gap-2 mb-3">
+                          <div className="w-1.5 h-1.5 rounded-full bg-zinc-600" />
+                          <p className="text-[9px] uppercase tracking-[0.25em] text-zinc-600">{copy.whyWorks}</p>
+                        </div>
+                        <p className="text-xs text-zinc-400 leading-relaxed pl-3.5">{analysis.why_it_works}</p>
+                      </div>
+                    )}
+
+                    {analysis.styling_tip && (
+                      <div className="bg-white/5 rounded-[2rem] p-5 border border-white/10 shadow-inner">
+                        <p className="text-[9px] uppercase tracking-[0.25em] text-zinc-500 mb-2.5">{copy.tip}</p>
+                        <p className="text-xs text-zinc-200 leading-relaxed font-medium">{analysis.styling_tip}</p>
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <p className="text-[10px] uppercase tracking-[0.3em] text-zinc-400 mt-3">{copy.match}</p>
-              </div>
-
-              <div className="space-y-6">
-                {analysis.overall_verdict && (
-                  <div>
-                    <p className="text-[9px] uppercase tracking-[0.2em] text-zinc-600 mb-2">{copy.overall}</p>
-                    <p className="text-xs text-zinc-300 leading-relaxed">{analysis.overall_verdict}</p>
-                  </div>
-                )}
-
-                {analysis.skin_tone_feedback && (
-                  <div>
-                    <p className="text-[9px] uppercase tracking-[0.2em] text-zinc-600 mb-2">{copy.skinTone}</p>
-                    <p className="text-xs text-zinc-300 leading-relaxed italic">{analysis.skin_tone_feedback}</p>
-                  </div>
-                )}
-
-                {analysis.why_it_works && (
-                  <div>
-                    <p className="text-[9px] uppercase tracking-[0.2em] text-zinc-600 mb-2">{copy.whyWorks}</p>
-                    <p className="text-xs text-zinc-400 leading-relaxed">{analysis.why_it_works}</p>
-                  </div>
-                )}
-
-                {analysis.styling_tip && (
-                  <div className="bg-white/5 rounded-2xl p-4 border border-white/10">
-                    <p className="text-[9px] uppercase tracking-[0.2em] text-zinc-500 mb-2">{copy.tip}</p>
-                    <p className="text-xs text-zinc-200 leading-relaxed font-medium">{analysis.styling_tip}</p>
-                  </div>
-                )}
-              </div>
+              )}
             </div>
           )}
 

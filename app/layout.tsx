@@ -2,7 +2,6 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Cormorant, Montserrat, Noto_Naskh_Arabic } from "next/font/google";
 import { validateRequiredEnv } from "@/lib/env";
 import { LocaleProvider } from "@/lib/locale-context";
-import LanguageToggle from "@/app/components/LanguageToggle";
 import "./globals.css";
 
 validateRequiredEnv(["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_ANON_KEY"], "the app");
@@ -62,6 +61,7 @@ export default function RootLayout({
   return (
     <html lang="en" dir="ltr">
       <head>
+        <meta name="p:domain_verify" content="be2dd9b13a24155c719d9395e6c66ea4" />
         <script dangerouslySetInnerHTML={{ __html: `(function(){
 var o=AbortController.prototype.abort;
 AbortController.prototype.abort=function(r){o.call(this,r!==undefined?r:new DOMException('The operation was aborted.','AbortError'))};
@@ -80,7 +80,6 @@ console.error=function(){
       </head>
       <body className={`${geistSans.variable} ${geistMono.variable} ${cormorant.variable} ${montserrat.variable} ${notoNaskhArabic.variable} antialiased`}>
         <LocaleProvider>
-          <LanguageToggle />
           {children}
         </LocaleProvider>
       </body>

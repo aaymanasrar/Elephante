@@ -50,11 +50,30 @@ export type Outfit = Partial<ExcelOutfit & DbOutfit> & {
 export interface GeneratedOutfitVariant {
   outfit_name?: string | null
   style?: string | null
+  color_scheme?: string | null
+  top_wear?: string | null
+  bottom_wear?: string | null
+  shoes?: string | null
+  accessories?: string | null
+  outerwear?: string | null
+  occasions?: string | null
+  when_to_wear?: string | null
+  outfit_details?: string | null
+  skin_tone_analysis?: string | null
+  skin_tone_reason?: string | null
+  pro_tip?: string | null
+  material_top?: string | null
+  material_bottom?: string | null
+  material_shoes?: string | null
+  key_colors?: string[] | null
+  gender?: string | null
   alternative?: GeneratedOutfitVariant | null
 }
 
 export interface GeneratedOutfitResult {
   outfit: GeneratedOutfitVariant | null
   image_url: string | null
+  image_provider?: string | null
   alternative_image_url?: string | null
+  alternative_image_provider?: string | null
 }

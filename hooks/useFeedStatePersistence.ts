@@ -1,7 +1,16 @@
 'use client'
 
 import { useEffect } from 'react'
-import type { ReadonlyURLSearchParams } from 'next/navigation'
+
+export interface PersistedFeedState<TAiContext, TGeneratedOutfit> {
+  aiContext: TAiContext | null
+  chatHistory: Array<{ role: 'user' | 'assistant'; content: string }>
+  finalBanner: { text: string; vibe: string; colors?: Array<{ hex: string; name: string }> } | null
+  generatedIds: { primary?: string; alternative?: string }
+  generatedOutfit: TGeneratedOutfit | null
+  inputValue: string
+  searchQuery: string
+}
 
 interface FeedStatePersistenceParams<TAiContext, TGeneratedOutfit> {
   aiContext: TAiContext | null
@@ -10,18 +19,53 @@ interface FeedStatePersistenceParams<TAiContext, TGeneratedOutfit> {
   generatedIds: { primary?: string; alternative?: string }
   generatedOutfit: TGeneratedOutfit | null
   inputValue: string
-  searchParams: ReadonlyURLSearchParams | null
   searchQuery: string
-  setAiContext: (value: TAiContext) => void
-  setChatHistory: (value: Array<{ role: 'user' | 'assistant'; content: string }>) => void
-  setFinalBanner: (value: { text: string; vibe: string; colors?: Array<{ hex: string; name: string }> }) => void
-  setGeneratedIds: (value: { primary?: string; alternative?: string }) => void
-  setGeneratedOutfit: (value: TGeneratedOutfit) => void
-  setInputValue: (value: string) => void
-  setSearchQuery: (value: string) => void
 }
 
-const FEED_STATE_KEY = 'elephante_feed_state'
+export const FEED_STATE_KEY = 'elephante_feed_state'
+
+function isPersistedFeedState<TAiContext, TGeneratedOutfit>(state: unknown): state is PersistedFeedState<TAiContext, TGeneratedOutfit> {
+  return Boolean(state && typeof state === 'object' && typeof (state as { searchQuery?: unknown }).searchQuery === 'string')
+}
+
+function normalizeChatHistory(history: Array<{ role: 'user' | 'assistant'; content: string }> | undefined) {
+  if (!Array.isArray(history)) return []
+
+  return history.reduce<Array<{ role: 'user' | 'assistant'; content: string }>>((turns, turn) => {
+    if (!turn || (turn.role !== 'user' && turn.role !== 'assistant') || typeof turn.content !== 'string') return turns
+
+    const previous = turns[turns.length - 1]
+    const previousPair = turns[turns.length - 2]
+    if (previous?.role === turn.role && previous.content === turn.content) return turns
+    if (previousPair?.role === turn.role && previousPair.content === turn.content) return turns
+
+    turns.push(turn)
+    return turns
+  }, [])
+}
+
+export function readFeedStateForQuery<TAiContext, TGeneratedOutfit>(query: string) {
+  if (typeof window === 'undefined' || !query) return null
+
+  try {
+    const saved = sessionStorage.getItem(FEED_STATE_KEY)
+    if (!saved) return null
+
+    const state: unknown = JSON.parse(saved)
+    if (!isPersistedFeedState<TAiContext, TGeneratedOutfit>(state)) return null
+    return state.searchQuery === query
+      ? { ...state, chatHistory: normalizeChatHistory(state.chatHistory) }
+      : null
+  } catch {
+    return null
+  }
+}
+
+function writeFeedState<TAiContext, TGeneratedOutfit>(state: PersistedFeedState<TAiContext, TGeneratedOutfit>) {
+  try {
+    sessionStorage.setItem(FEED_STATE_KEY, JSON.stringify(state))
+  } catch {}
+}
 
 export function useFeedStatePersistence<TAiContext, TGeneratedOutfit>({
   aiContext,
@@ -30,53 +74,40 @@ export function useFeedStatePersistence<TAiContext, TGeneratedOutfit>({
   generatedIds,
   generatedOutfit,
   inputValue,
-  searchParams,
   searchQuery,
-  setAiContext,
-  setChatHistory,
-  setFinalBanner,
-  setGeneratedIds,
-  setGeneratedOutfit,
-  setInputValue,
-  setSearchQuery,
 }: FeedStatePersistenceParams<TAiContext, TGeneratedOutfit>) {
   const saveFeedState = () => {
     if (!searchQuery) return
 
-    try {
-      sessionStorage.setItem(FEED_STATE_KEY, JSON.stringify({
-        searchQuery,
-        aiContext,
-        chatHistory,
-        finalBanner,
-        generatedIds,
-        generatedOutfit,
-        inputValue,
-      }))
-    } catch {}
+    writeFeedState({
+      searchQuery,
+      aiContext,
+      chatHistory: normalizeChatHistory(chatHistory),
+      finalBanner,
+      generatedIds,
+      generatedOutfit,
+      inputValue,
+    })
   }
 
   useEffect(() => {
-    try {
-      const saved = sessionStorage.getItem(FEED_STATE_KEY)
-      if (!saved) return
+    if (!searchQuery) {
+      try { sessionStorage.removeItem(FEED_STATE_KEY) } catch {}
+      return
+    }
 
-      const state = JSON.parse(saved)
-      if (!state || typeof state !== 'object' || typeof state.searchQuery !== 'string') return
-      const urlQuery = searchParams?.get('q') || ''
-      if (state.searchQuery && state.searchQuery === urlQuery) {
-        setSearchQuery(state.searchQuery)
-        setInputValue(typeof state.inputValue === 'string' ? state.inputValue : state.searchQuery)
-        if (state.aiContext) setAiContext(state.aiContext)
-        if (Array.isArray(state.chatHistory)) setChatHistory(state.chatHistory)
-        if (state.finalBanner) setFinalBanner(state.finalBanner)
-        if (state.generatedIds && typeof state.generatedIds === 'object') setGeneratedIds(state.generatedIds)
-        if (state.generatedOutfit) setGeneratedOutfit(state.generatedOutfit)
-      }
+    if (!aiContext && chatHistory.length === 0 && !finalBanner && !generatedOutfit) return
 
-      sessionStorage.removeItem(FEED_STATE_KEY)
-    } catch {}
-  }, [searchParams, setAiContext, setChatHistory, setFinalBanner, setGeneratedIds, setGeneratedOutfit, setInputValue, setSearchQuery])
+    writeFeedState({
+      searchQuery,
+      aiContext,
+      chatHistory: normalizeChatHistory(chatHistory),
+      finalBanner,
+      generatedIds,
+      generatedOutfit,
+      inputValue,
+    })
+  }, [aiContext, chatHistory, finalBanner, generatedIds, generatedOutfit, inputValue, searchQuery])
 
   return { saveFeedState }
 }

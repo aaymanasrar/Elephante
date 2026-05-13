@@ -22,11 +22,32 @@ const WARDROBE_PROMPT = `You are a fashion AI. Analyse this clothing image and r
 {
   "item_name": "short descriptive name e.g. 'White linen shirt', 'Black slim chinos', 'Chunky white sneakers'",
   "item_type": "one of: top, bottom, shoes, outerwear, accessory, full outfit",
+  "pieces": ["every visible garment/accessory as a separate string, e.g. 'white linen shirt', 'black slim trousers', 'silver watch'"],
   "color": "primary colour name e.g. 'White', 'Navy', 'Olive'",
   "occasion": "one suitable occasion e.g. 'Office', 'Weekend', 'Wedding Guest'",
   "style_query": "a natural search query Elephante should use e.g. 'outfits to wear with white linen shirt', 'style black slim chinos for smart casual'"
 }
-Be specific about the garment. If it's a full outfit, describe the main pieces briefly in item_name.`
+Be specific about what is visible. If the image shows a full outfit, set item_type to "full outfit", make item_name a short outfit summary, and include every visible clothing item and accessory in pieces: tops, bottoms, shoes, outerwear, bags, hats, belts, watches, jewellery, eyewear, socks, and visible layering. Do not invent hidden items; only include what can be seen.`
+
+function asString(value: unknown, fallback = '') {
+  return typeof value === 'string' && value.trim() ? value.trim() : fallback
+}
+
+function asStringArray(value: unknown) {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map((item) => item.trim())
+}
+
+function normalizePieces(value: unknown) {
+  const seen = new Set<string>()
+  return asStringArray(value).filter((piece) => {
+    const normalized = piece.toLowerCase()
+    if (['null', 'none', 'n/a', 'na'].includes(normalized) || normalized.includes('not visible') || normalized.includes('not shown')) return false
+    if (seen.has(normalized)) return false
+    seen.add(normalized)
+    return true
+  })
+}
 
 async function getAuthenticatedUserId(request: NextRequest, supabaseUrl: string, supabaseAnonKey: string) {
   const authorization = request.headers.get('authorization')
@@ -103,6 +124,7 @@ async function handleAnalyze(request: NextRequest, userId: string, supabase: Sup
 
   let itemName = 'Clothing item'
   let itemType = 'top'
+  let pieces: string[] = []
   let color = ''
   let occasion = ''
   let styleQuery = ''
@@ -110,11 +132,12 @@ async function handleAnalyze(request: NextRequest, userId: string, supabase: Sup
   try {
     const { content } = await analyzeImageWithFallback(publicUrl, WARDROBE_PROMPT)
     const parsed = extractJSON(content)
-    itemName = parsed.item_name || itemName
-    itemType = parsed.item_type || itemType
-    color = parsed.color || color
-    occasion = parsed.occasion || occasion
-    styleQuery = parsed.style_query || `outfits to wear with ${itemName}`
+    itemName = asString(parsed.item_name, itemName)
+    itemType = asString(parsed.item_type, itemType)
+    pieces = normalizePieces(parsed.pieces)
+    color = asString(parsed.color, color)
+    occasion = asString(parsed.occasion, occasion)
+    styleQuery = asString(parsed.style_query, `outfits to wear with ${pieces.length ? pieces.join(', ') : itemName}`)
   } catch {
     styleQuery = `style this ${itemType}`
   }
@@ -124,6 +147,7 @@ async function handleAnalyze(request: NextRequest, userId: string, supabase: Sup
     storage_path: path,
     item_name: itemName,
     item_type: itemType,
+    pieces,
     color,
     occasion,
     style_query: styleQuery,

@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
+import OpenAI from 'openai'
 import { chatWithFallback, extractJSON } from '@/services/aiProviders'
 import { rateLimit } from '@/lib/rateLimit'
 import { generateEdenAIImage, hasEdenAIImageConfig } from '@/lib/edenaiImage'
 import { generateMagnificMysticImage, hasMagnificImageConfig } from '@/lib/magnificImage'
 import { buildCatalogMannequinImagePrompt } from '@/lib/outfitImagePrompt'
+import { generateSkyworkImage, hasSkyworkImageConfig } from '@/lib/skyworkImage'
+import { generateFalImage, hasFalImageConfig } from '@/lib/falImage'
+import { getOpenAIKeys } from '@/lib/openaiKeys'
+
+export const maxDuration = 300
 
 const SYSTEM = `You are Elephante, a sharp AI fashion stylist. First understand exactly what the user needs — the occasion, the item they own, the mood — then build ONE complete outfit that directly answers their request AND is tailored to their body shape and skin tone.
 
@@ -60,6 +66,7 @@ If skin_tone_match is false, replace "alternative": null with:
 
 Rules:
 - If the user mentions a piece they own, INCLUDE it exactly in the primary outfit — then build around it to flatter their shape.
+- If the request is a joke-inspired/off-topic detour prompt, make a wearable outfit that reflects the joke through mood, color, or one witty detail. Do not make it a costume.
 - Keep it achievable — real everyday items only.
 - Max 4 pieces. Only add outerwear/accessories if they genuinely elevate the look.
 - skin_tone_analysis must be honest. Bold colours on the wrong undertone clash — say so.`
@@ -139,13 +146,33 @@ export async function POST(req: NextRequest) {
       return `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?${params}`
     }
 
-    async function generatedImageUrl(o: GeneratedOutfitForImage, seed: number): Promise<string> {
+    async function generatedImageUrl(o: GeneratedOutfitForImage, seed: number): Promise<{ url: string; provider: string }> {
       const prompt = buildImagePrompt(o, o.gender || outfit.gender)
+
+      if (hasFalImageConfig()) {
+        try {
+          const { resourceUrl, dataUrl } = await generateFalImage(prompt)
+          return { url: resourceUrl || dataUrl, provider: 'fal-flux-pro' }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Unknown error'
+          console.warn('[outfit-generate] FAL.ai failed:', message)
+        }
+      }
+
+      if (hasSkyworkImageConfig()) {
+        try {
+          const { resourceUrl, dataUrl } = await generateSkyworkImage(prompt)
+          return { url: resourceUrl || dataUrl, provider: 'skywork' }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Unknown error'
+          console.warn('[outfit-generate] Skywork failed:', message)
+        }
+      }
 
       if (hasMagnificImageConfig()) {
         try {
           const { resourceUrl, dataUrl } = await generateMagnificMysticImage(prompt)
-          return resourceUrl || dataUrl
+          return { url: resourceUrl || dataUrl, provider: 'magnific-mystic' }
         } catch (err) {
           const message = err instanceof Error ? err.message : 'Unknown error'
           console.warn('[outfit-generate] Magnific failed:', message)
@@ -155,26 +182,59 @@ export async function POST(req: NextRequest) {
       if (hasEdenAIImageConfig()) {
         try {
           const { dataUrl, resourceUrl } = await generateEdenAIImage(prompt)
-          return resourceUrl || dataUrl
+          return { url: resourceUrl || dataUrl, provider: 'edenai-seedream' }
         } catch (err) {
           const message = err instanceof Error ? err.message : 'Unknown error'
           console.warn('[outfit-generate] EdenAI failed:', message)
         }
       }
 
-      return pollinationsUrl(prompt, seed)
+      const openAIKeys = getOpenAIKeys()
+      for (const apiKey of openAIKeys) {
+        try {
+          const client = new OpenAI({ apiKey, timeout: 90_000 })
+          const enhancedPrompt = `Fashion product catalog photograph. ${prompt}. Pure white seamless studio background, full-body centered composition from head to shoes. Soft studio lighting, crisp realistic garment texture. Smooth white faceless mannequin, no facial features, no skin, no hair. No text, no watermarks, no props.`
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const response = await (client.images.generate as any)({
+            model: 'gpt-image-1',
+            prompt: enhancedPrompt,
+            size: '1024x1536',
+            quality: 'high',
+            n: 1,
+          }) as { data?: Array<{ b64_json?: string; url?: string }> }
+          const b64 = response.data?.[0]?.b64_json
+          if (b64) return { url: `data:image/png;base64,${b64}`, provider: 'gpt-image-2' }
+          const imageUrl = response.data?.[0]?.url
+          if (imageUrl) return { url: imageUrl, provider: 'gpt-image-2' }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Unknown error'
+          console.warn('[outfit-generate] GPT Image 2 failed:', message)
+        }
+      }
+
+      return { url: pollinationsUrl(prompt, seed), provider: 'pollinations' }
     }
 
-    const image_url = await generatedImageUrl(outfit, seedFromQuery(query))
+    const primaryImage = await generatedImageUrl(outfit, seedFromQuery(query))
+    const image_url = primaryImage.url
 
     // 3. Build alternative URL if the primary doesn't suit the skin tone
     let alternative_image_url: string | null = null
+    let alternative_image_provider: string | null = null
     if (outfit.alternative && outfit.skin_tone_match === false) {
       outfit.alternative.gender = outfit.gender
-      alternative_image_url = await generatedImageUrl(outfit.alternative, seedFromQuery(query + '_alt'))
+      const alternativeImage = await generatedImageUrl(outfit.alternative, seedFromQuery(query + '_alt'))
+      alternative_image_url = alternativeImage.url
+      alternative_image_provider = alternativeImage.provider
     }
 
-    return NextResponse.json({ outfit, image_url, alternative_image_url })
+    return NextResponse.json({
+      outfit,
+      image_url,
+      image_provider: primaryImage.provider,
+      alternative_image_url,
+      alternative_image_provider,
+    })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err)
     console.error('[outfit-generate]', message)

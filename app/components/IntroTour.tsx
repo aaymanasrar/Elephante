@@ -18,36 +18,45 @@ const STEPS: Step[] = [
     id: 'ai-stylist',
     title: 'Elephante AI',
     titleAr: 'Elephante AI',
-    description: 'Your personal AI stylist. Tap to get curated outfit recommendations tailored to your style.',
-    descriptionAr: 'منسّقك الذكي الشخصي. اضغط للحصول على اقتراحات إطلالات تناسب أسلوبك.',
+    description: 'Your personal AI stylist. Tap to get curated outfit recommendations tailored to your unique style.',
+    descriptionAr: 'منسّقك الذكي الشخصي. اضغط للحصول على اقتراحات إطلالات تناسب أسلوبك الفريد.',
     targetId: 'tour-ai-stylist',
     preferredPlacement: 'bottom',
   },
   {
-    id: 'profile',
-    title: 'Your Profile',
-    titleAr: 'ملفك الشخصي',
-    description: 'Tap your name to view your style profile, saved looks, and personal preferences.',
-    descriptionAr: 'اضغط اسمك لعرض ملف الأناقة، الإطلالات المحفوظة، والتفضيلات الشخصية.',
-    targetId: 'tour-profile',
+    id: 'camera',
+    title: 'Outfit Analyzer',
+    titleAr: 'محلل الإطلالة',
+    description: 'Upload a photo of your outfit to get instant ratings, styling tips, and color harmony analysis.',
+    descriptionAr: 'ارفع صورة لإطلالتك للحصول على تقييم فوري، نصائح تنسيق، وتحليل لتناسق الألوان.',
+    targetId: 'tour-camera',
+    preferredPlacement: 'bottom',
+  },
+  {
+    id: 'search',
+    title: 'Smart Search',
+    titleAr: 'البحث الذكي',
+    description: 'Search for any outfit by occasion or vibe. Try "wedding guest" or "weekend casual".',
+    descriptionAr: 'ابحث عن أي إطلالة حسب المناسبة أو الأجواء. جرّب "رسمي" أو "كاجوال".',
+    targetId: 'tour-search',
     preferredPlacement: 'bottom',
   },
   {
     id: 'closet',
     title: 'Your Closet',
     titleAr: 'خزانتك',
-    description: 'Browse and manage your wardrobe archive, every outfit organized and curated.',
-    descriptionAr: 'تصفح وأدر أرشيف خزانتك، كل إطلالة منظمة ومختارة بعناية.',
+    description: 'Manage your personal wardrobe archive, with every piece organized and easily accessible.',
+    descriptionAr: 'أدِر أرشيف خزانتك الشخصية، مع تنظيم كل قطعة لتسهيل الوصول إليها.',
     targetId: 'tour-closet',
-    preferredPlacement: 'left',
+    preferredPlacement: 'bottom',
   },
   {
-    id: 'search',
-    title: 'Search',
-    titleAr: 'البحث',
-    description: 'Search for any outfit by style, occasion, color, or vibe. Try "business casual" or "wedding".',
-    descriptionAr: 'ابحث عن أي إطلالة حسب الأسلوب أو المناسبة أو اللون أو الإحساس.',
-    targetId: 'tour-search',
+    id: 'profile',
+    title: 'Style Profile',
+    titleAr: 'الملف الشخصي',
+    description: 'Customize your style preferences, skin tone, and body shape for highly personalized results.',
+    descriptionAr: 'خصص تفضيلاتك للأناقة، ولون البشرة، وشكل الجسم للحصول على نتائج مخصصة جداً.',
+    targetId: 'tour-profile',
     preferredPlacement: 'bottom',
   },
 ]
@@ -133,35 +142,48 @@ export default function IntroTour({ onDone }: { onDone: () => void }) {
 
   const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
 
+  const isMobile = viewportWidth < 768
   const highlightStyle: React.CSSProperties = {
     top: activeRect.top,
     left: activeRect.left,
     width: activeRect.width,
     height: activeRect.height,
-    borderRadius: current.id === 'search' ? '28px' : '14px',
+    borderRadius: current.id === 'search' || current.id === 'camera' ? '28px' : '14px',
   }
 
-  const cardTop = current.preferredPlacement === 'left'
-    ? clamp(activeRect.top + activeRect.height / 2 - 88, 16, viewportHeight - 210)
+
+  // Smart placement logic
+  let placement = current.preferredPlacement
+  const spaceBelow = viewportHeight - activeRect.bottom
+  const spaceAbove = activeRect.top
+  const spaceLeft = activeRect.left
+  const spaceRight = viewportWidth - activeRect.right
+
+  if (spaceBelow < 220 && spaceAbove > spaceBelow) {
+    placement = 'top'
+  } else if (!isMobile && spaceRight > 350 && (current.id === 'closet' || current.id === 'camera')) {
+    placement = 'right'
+  } else if (!isMobile && spaceLeft > 350 && current.id === 'closet') {
+    placement = 'left'
+  }
+
+  const cardTop = placement === 'top'
+    ? clamp(activeRect.top - 180 - gap, 16, viewportHeight - 210)
     : clamp(activeRect.bottom + gap, 16, viewportHeight - 210)
 
-  const cardLeft = current.preferredPlacement === 'left'
+  const cardLeft = placement === 'left'
     ? clamp(activeRect.left - cardWidth - gap, 16, viewportWidth - cardWidth - 16)
-    : clamp(activeRect.left + activeRect.width / 2 - cardWidth / 2, 16, viewportWidth - cardWidth - 16)
+    : placement === 'right'
+      ? clamp(activeRect.right + gap, 16, viewportWidth - cardWidth - 16)
+      : clamp(activeRect.left + activeRect.width / 2 - cardWidth / 2, 16, viewportWidth - cardWidth - 16)
 
-  const connectorStyle: React.CSSProperties = current.preferredPlacement === 'left'
-    ? {
-        top: activeRect.top + activeRect.height / 2 - 11,
-        left: cardLeft + cardWidth + 4,
-      }
-    : {
-        top: activeRect.bottom + 2,
-        left: activeRect.left + activeRect.width / 2 - 11,
-      }
+  const connectorStyle: React.CSSProperties = {
+    top: placement === 'top' ? activeRect.top - 24 : placement === 'left' || placement === 'right' ? activeRect.top + activeRect.height / 2 - 11 : activeRect.bottom + 2,
+    left: placement === 'left' ? cardLeft + cardWidth + 4 : placement === 'right' ? cardLeft - 26 : activeRect.left + activeRect.width / 2 - 11,
+    transform: placement === 'top' ? 'rotate(180deg)' : placement === 'right' ? 'rotate(-90deg)' : placement === 'left' ? 'rotate(90deg)' : 'none',
+  }
 
-  const connectorPath = current.preferredPlacement === 'left'
-    ? <path d="M5 12h14M12 5l7 7-7 7" stroke="rgba(255,255,255,0.6)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    : <path d="M12 19V5M5 12l7-7 7 7" stroke="rgba(255,255,255,0.6)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+  const connectorPath = <path d="M12 19V5M5 12l7-7 7 7" stroke="rgba(255,255,255,0.6)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
 
   return (
     <div
@@ -197,12 +219,13 @@ export default function IntroTour({ onDone }: { onDone: () => void }) {
           left: cardLeft,
           zIndex: 10,
           width: cardWidth,
-          background: 'rgba(12,12,12,0.96)',
-          border: '1px solid rgba(255,255,255,0.1)',
-          borderRadius: '16px',
-          padding: '16px 18px',
-          backdropFilter: 'blur(16px)',
-          WebkitBackdropFilter: 'blur(16px)',
+          background: 'rgba(12,12,12,0.85)',
+          border: '1px solid rgba(255,255,255,0.15)',
+          borderRadius: '24px',
+          padding: '20px 24px',
+          backdropFilter: 'blur(20px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+          boxShadow: '0 20px 40px rgba(0,0,0,0.4), inset 0 0 0 1px rgba(255,255,255,0.05)',
         }}
         onClick={event => event.stopPropagation()}
       >

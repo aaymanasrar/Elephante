@@ -12,37 +12,49 @@ interface AnalysisPayload {
   key_colors: string[]
   why_it_works: string
   styling_tip: string
+  rating_out_of_10: number | null
   match_score: number | null
+  proportion_score: number | null
+  color_harmony_score: number | null
+  silhouette_feedback: string
   skin_tone_feedback: string
   overall_verdict: string
 }
 
 type AnalysisMode = 'inventory' | 'rating'
 
-const VISION_PROMPT = `You are Elephante's AI Stylist. Analyse the attached outfit image(s) and return ONLY a raw JSON object (no markdown, no code blocks) with this exact structure:
+const VISION_PROMPT = `You are Elephante's AI Stylist, an expert in high-fashion, color theory, and silhouette engineering. Analyse the attached outfit image(s) and return ONLY a raw JSON object (no markdown, no code blocks) with this exact structure:
 {
   "outfit_name": "short catchy name for the look",
   "style": "style category e.g. Smart Casual, Business Casual, Formal, Streetwear",
   "vibe": "3 words max",
   "color_scheme": "1 sentence describing the palette",
   "occasions": ["occasion1", "occasion2"],
-  "pieces": ["top garment description", "bottom garment description", "shoes description", "accessories or null", "outerwear or null"],
+  "pieces": ["visible top garment description", "visible bottom garment description", "visible shoes description", "visible bag/watch/belt/jewellery/hat/eyewear if present"],
   "color_names": ["ColorName1", "ColorName2", "ColorName3"],
   "key_colors": ["#hex1", "#hex2", "#hex3"],
   "why_it_works": "2 sentences about why this outfit works stylistically",
-  "styling_tip": "one actionable tip to elevate the look",
+  "styling_tip": "one actionable tip to elevate the look using specific styling techniques",
+  "rating_out_of_10": 8.5,
   "match_score": 85,
-  "skin_tone_feedback": "Detailed feedback on how these colors complement the user's skin tone",
+  "proportion_score": 90,
+  "color_harmony_score": 88,
+  "silhouette_feedback": "Detailed feedback on how the fit and volume of the clothes interact with the user's body shape and height",
+  "skin_tone_feedback": "Detailed feedback on how these colors complement the user's skin tone and undertone using Seasonal Color Analysis principles",
   "overall_verdict": "A summary verdict on the overall look"
 }
-For pieces: always 5 strings in order [top, bottom, shoes, accessories, outerwear]. Use null string if a piece is not visible.
+For pieces: include every visible outfit item as its own string. Name the category plus visible color/material/cut when possible. Include tops, bottoms, shoes, outerwear, bags, hats, belts, watches, jewellery, eyewear, socks, and visible layering. Do not invent hidden items; omit anything that is not visible instead of adding null.
 For color_names: simple English color names like Navy, White, Tan, Charcoal etc.
-Match score should be between 0 and 100.
+All percentage scores should be between 0 and 100. rating_out_of_10 should be between 0 and 10 and may use one decimal.
 
-Judge two things clearly:
-1. Skin-tone harmony: whether the palette flatters the user's skin tone, creates good contrast, or washes them out.
-2. Overall outfit cohesion: silhouette, proportions, color balance, formality, and whether the pieces feel intentional together.
-Be honest and specific, but never insulting. If the user's skin tone is not provided, say that skin-tone feedback is limited and focus on the visible palette.`
+Expert Analysis Criteria:
+1. Proportion (Proportion Score): Use the 'Rule of Thirds' and 'Golden Ratio'. Evaluate if the horizontal lines created by the garments (waistline, hemline) divide the body into flattering segments.
+2. Color Harmony (Color Harmony Score): Evaluate the palette based on complementary, analogous, or monochromatic color theory.
+3. Skin-tone Harmony: Determine if the palette matches the user's seasonal color (Spring, Summer, Autumn, Winter) based on their skin tone and undertone.
+4. Silhouette & Fit (Silhouette Feedback): Analyze the volume (tight vs loose) and how it balances the user's body shape (e.g., Hourglass, Rectangle, Inverted Triangle).
+5. Overall Cohesion: Formality balance, texture interaction, and intentionality.
+
+Be honest, sophisticated, and specific. If the user's profile data is not provided, provide general expert advice based on the visible image.`
 
 const INVENTORY_PROMPT = `You are Elephante's visual fashion analyst. Identify what is visible in the attached clothing or outfit image and return ONLY a raw JSON object (no markdown, no code blocks) with this exact structure:
 {
@@ -51,16 +63,20 @@ const INVENTORY_PROMPT = `You are Elephante's visual fashion analyst. Identify w
   "vibe": "3 words max",
   "color_scheme": "1 sentence describing the visible palette",
   "occasions": ["occasion1", "occasion2"],
-  "pieces": ["top garment description", "bottom garment description", "shoes description", "accessories or null", "outerwear or null"],
+  "pieces": ["visible top garment description", "visible bottom garment description", "visible shoes description", "visible bag/watch/belt/jewellery/hat/eyewear if present"],
   "color_names": ["ColorName1", "ColorName2", "ColorName3"],
   "key_colors": ["#hex1", "#hex2", "#hex3"],
   "why_it_works": "1 sentence describing the visible styling or item logic without rating it",
   "styling_tip": "one neutral styling possibility based on the visible items",
+  "rating_out_of_10": null,
   "match_score": null,
+  "proportion_score": null,
+  "color_harmony_score": null,
+  "silhouette_feedback": "Brief neutral description of the visible silhouette",
   "skin_tone_feedback": "Do not rate skin-tone fit yet. If skin is visible, briefly name that rating can consider contrast later; otherwise say skin tone is not visible.",
   "overall_verdict": "A concise inventory summary of what is visible, not a judgement"
 }
-For pieces: always 5 strings in order [top, bottom, shoes, accessories, outerwear]. Use null string if a piece is not visible.
+For pieces: include every visible outfit item as its own string. Name the category plus visible color/material/cut when possible. Include tops, bottoms, shoes, outerwear, bags, hats, belts, watches, jewellery, eyewear, socks, and visible layering. Do not invent hidden items; omit anything that is not visible instead of adding null.
 Do not score or judge the outfit in this mode. Focus on what is there: garments, colors, silhouette, and visible styling details.`
 
 function uniqueStrings(values: unknown[]) {
@@ -85,12 +101,40 @@ function asStringArray(value: unknown, fallback: string[] = []) {
   return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map((item) => item.trim())
 }
 
-function clampScore(value: unknown) {
+function parseNumeric(value: unknown) {
   const score = typeof value === 'string'
     ? Number(value.match(/-?\d+(?:\.\d+)?/)?.[0])
     : Number(value)
-  if (!Number.isFinite(score)) return 70
+  return Number.isFinite(score) ? score : null
+}
+
+function clampScore(value: unknown) {
+  const score = parseNumeric(value)
+  if (score === null) return 70
   return Math.max(0, Math.min(100, Math.round(score)))
+}
+
+function clampOutOf10(value: unknown, fallbackScores: Array<number | null>) {
+  const direct = parseNumeric(value)
+  if (direct !== null) {
+    const normalized = direct > 10 ? direct / 10 : direct
+    return Math.max(0, Math.min(10, Math.round(normalized * 10) / 10))
+  }
+
+  const usableScores = fallbackScores.filter((score): score is number => Number.isFinite(score))
+  const fallback = usableScores.length
+    ? usableScores.reduce((sum, score) => sum + score, 0) / usableScores.length / 10
+    : 7
+  return Math.max(0, Math.min(10, Math.round(fallback * 10) / 10))
+}
+
+function normalizePieces(value: unknown, fallback: string[]) {
+  const pieces = asStringArray(value, fallback)
+  const cleaned = uniqueStrings(pieces).filter((piece) => {
+    const normalized = piece.toLowerCase()
+    return !['null', 'none', 'n/a', 'na'].includes(normalized) && !normalized.includes('not visible') && !normalized.includes('not shown')
+  })
+  return cleaned.length ? cleaned : fallback
 }
 
 function compactModelText(raw: string) {
@@ -106,8 +150,10 @@ function normalizeAnalysis(parsed: Record<string, unknown>, fallbackText: string
   const limitedSkinTone = skinTone
     ? `For ${skinTone.replace(/_/g, ' ')}, the palette should be judged by contrast, warmth, and whether the colors brighten the complexion.`
     : 'Skin-tone feedback is limited because no skin tone was provided.'
-  const pieces = asStringArray(parsed.pieces, ['visible top or main layer', 'visible bottom or lower half', 'shoes not visible', 'accessories not visible', 'outerwear not visible'])
-  const normalizedPieces = [...pieces, 'null', 'null', 'null', 'null', 'null'].slice(0, 5)
+  const normalizedPieces = normalizePieces(parsed.pieces, ['visible outfit item'])
+  const matchScore = mode === 'rating' ? clampScore(parsed.match_score) : null
+  const proportionScore = mode === 'rating' ? clampScore(parsed.proportion_score) : null
+  const colorHarmonyScore = mode === 'rating' ? clampScore(parsed.color_harmony_score) : null
 
   return {
     outfit_name: asString(parsed.outfit_name, 'Attached Outfit'),
@@ -120,7 +166,11 @@ function normalizeAnalysis(parsed: Record<string, unknown>, fallbackText: string
     key_colors: asStringArray(parsed.key_colors).filter((hex) => /^#[0-9a-f]{6}$/i.test(hex)).slice(0, 6),
     why_it_works: asString(parsed.why_it_works, overallFallback),
     styling_tip: asString(parsed.styling_tip, 'If something feels off, repeat one key color in the shoes, bag, or outerwear to make the outfit feel intentional.'),
-    match_score: mode === 'rating' ? clampScore(parsed.match_score) : null,
+    rating_out_of_10: mode === 'rating' ? clampOutOf10(parsed.rating_out_of_10, [matchScore, proportionScore, colorHarmonyScore]) : null,
+    match_score: matchScore,
+    proportion_score: proportionScore,
+    color_harmony_score: colorHarmonyScore,
+    silhouette_feedback: asString(parsed.silhouette_feedback, 'Silhouette analysis considers volume and proportion relative to your body shape.'),
     skin_tone_feedback: asString(parsed.skin_tone_feedback, limitedSkinTone),
     overall_verdict: asString(parsed.overall_verdict, overallFallback),
   }
@@ -135,14 +185,27 @@ export async function POST(req: NextRequest) {
     const imageLabels = asStringArray(body.image_labels)
     const language = asString(body.language, 'en')
     const mode: AnalysisMode = asString(body.mode) === 'inventory' ? 'inventory' : 'rating'
+    const gender = asString(body.gender)
+    const skinUndertone = asString(body.skin_undertone)
+    const bodyShape = asString(body.body_shape)
+    const heightCategory = asString(body.height_category)
 
     if (imageUrls.length === 0) return NextResponse.json({ error: 'At least one outfit image is required.' }, { status: 400 })
 
     let prompt = mode === 'inventory' ? INVENTORY_PROMPT : VISION_PROMPT
-    if (skinTone) {
-      prompt += `\n\nThe user's skin tone is: ${skinTone.replace(/_/g, ' ')}. Specifically analyze how the outfit colors interact with this skin tone.`
+    
+    // Build User Context String
+    let contextStr = ''
+    if (gender) contextStr += `\n- Gender: ${gender}`
+    if (skinTone) contextStr += `\n- Skin Tone: ${skinTone.replace(/_/g, ' ')}`
+    if (skinUndertone) contextStr += `\n- Skin Undertone: ${skinUndertone}`
+    if (bodyShape) contextStr += `\n- Body Shape: ${bodyShape.replace(/_/g, ' ')}`
+    if (heightCategory) contextStr += `\n- Height Category: ${heightCategory.replace(/_/g, ' ')}`
+
+    if (contextStr) {
+      prompt += `\n\nUser Profile Context:${contextStr}\nUse this data to provide highly personalized advice.`
     } else {
-      prompt += '\n\nThe user did not provide a skin tone. Do not invent one; explain skin-tone fit in conditional terms.'
+      prompt += '\n\nNo user profile data provided. Provide general expert advice.'
     }
     if (language === 'ar') {
       prompt += '\n\nWrite every user-facing JSON string value in Arabic.'

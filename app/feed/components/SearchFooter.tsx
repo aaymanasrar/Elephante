@@ -1,7 +1,8 @@
 'use client'
 
 import Image from 'next/image'
-import type { ChangeEvent, ReactNode, RefObject } from 'react'
+import { useState } from 'react'
+import type { ChangeEvent, ClipboardEvent, DragEvent, ReactNode, RefObject } from 'react'
 import type { WardrobeAttachment } from '@/hooks/useWardrobeAttachment'
 import { useLocale } from '@/lib/locale-context'
 
@@ -9,10 +10,24 @@ type AttachmentAnalysis = {
   outfit_name?: string
   pieces?: string[]
   color_names?: string[]
+  key_colors?: string[]
   color_scheme?: string
 }
 
 type AttachmentAnalysisMode = 'inventory' | 'rating'
+
+function visibleLabels(values: Array<string | undefined>) {
+  const seen = new Set<string>()
+  return values.filter((value): value is string => {
+    if (!value?.trim()) return false
+    const label = value.trim()
+    const normalized = label.toLowerCase()
+    if (['null', 'none', 'n/a', 'na'].includes(normalized) || normalized.includes('not visible') || normalized.includes('not shown')) return false
+    if (seen.has(normalized)) return false
+    seen.add(normalized)
+    return true
+  })
+}
 
 interface SearchFooterProps {
   attachment: WardrobeAttachment | null
@@ -21,6 +36,7 @@ interface SearchFooterProps {
   clearAttachment: () => void
   fileInputRef: RefObject<HTMLInputElement | null>
   handleAttachment: (event: ChangeEvent<HTMLInputElement>) => Promise<void>
+  handleAttachmentFile: (file: File) => Promise<void>
   inputValue: string
   isAnalyzingAttachment?: boolean
   isThinking: boolean
@@ -39,6 +55,7 @@ export default function SearchFooter({
   clearAttachment,
   fileInputRef,
   handleAttachment,
+  handleAttachmentFile,
   inputValue,
   isAnalyzingAttachment = false,
   isThinking,
@@ -50,48 +67,79 @@ export default function SearchFooter({
   onSubmit,
 }: SearchFooterProps) {
   const { isAr } = useLocale()
+  const [draggingPhoto, setDraggingPhoto] = useState(false)
   const copy = isAr ? {
     identifying: 'جارٍ التعرّف...',
-    analyzePhoto: 'حلّل الصورة',
-    analyzingPhoto: 'جارٍ التحليل...',
+    checking: 'جارٍ التحليل...',
     detected: 'ما وجدته',
-    rateOutfit: 'قيّم الإطلالة',
-    ratingOutfit: 'جارٍ التقييم...',
-    rateAgain: 'أعد التقييم',
+    styleCheck: 'تحليل الإطلالة',
+    checkAgain: 'أعد التحليل',
     removePhoto: 'إزالة صورة الملابس',
     attachPhoto: 'إرفاق صورة ملابس',
     uploadPhoto: 'رفع صورة ملابس',
+    dropPhoto: 'اترك الصورة هنا',
+    readyToAnalyze: 'جاهز للتحليل',
     search: 'بحث',
   } : {
     identifying: 'Identifying...',
-    analyzePhoto: 'Analyze Photo',
-    analyzingPhoto: 'Analyzing...',
+    checking: 'Checking...',
     detected: 'What I see',
-    rateOutfit: 'Rate Outfit',
-    ratingOutfit: 'Rating...',
-    rateAgain: 'Rate Again',
+    styleCheck: 'Style Check',
+    checkAgain: 'Check Again',
     removePhoto: 'Remove uploaded clothing photo',
     attachPhoto: 'Attach clothing photo',
     uploadPhoto: 'Upload clothing photo',
+    dropPhoto: 'Drop photo here',
+    readyToAnalyze: 'Ready to analyze',
     search: 'Search',
   }
   const canUseAttachment = Boolean(attachment?.image_url && !attachment.uploading)
   const canSubmit = Boolean(inputValue.trim()) || canUseAttachment
-  const detectedPieces = (attachmentAnalysis?.pieces || [])
-    .filter((piece) => piece && !/^null$/i.test(piece.trim()) && !/not visible/i.test(piece))
-    .slice(0, 5)
+  const detectedPieces = visibleLabels(attachmentAnalysis?.pieces || [])
+  const uploadedPieces = visibleLabels(attachment?.pieces || [])
   const fallbackTags = attachment?.tags
     .filter((tag) => tag.label && !['Color', 'Occasion'].includes(tag.label))
     .map((tag) => tag.label)
-  const visibleDetections = detectedPieces.length ? detectedPieces : (fallbackTags || [])
+  const visibleDetections = detectedPieces.length
+    ? detectedPieces
+    : uploadedPieces.length
+      ? uploadedPieces
+      : visibleLabels([attachment?.item_name, ...(fallbackTags || [])])
+  const hexColors = (attachmentAnalysis?.key_colors || []).filter((c) => /^#[0-9a-f]{6}$/i.test(c))
   const actionLabel = isAnalyzingAttachment
-    ? (attachmentAnalysisMode === 'rating' ? copy.ratingOutfit : copy.analyzingPhoto)
-    : attachmentAnalysisMode === 'inventory'
-      ? copy.rateOutfit
-      : attachmentAnalysisMode === 'rating'
-        ? copy.rateAgain
-        : copy.analyzePhoto
-  const actionHandler = attachmentAnalysisMode === 'inventory' ? onRateAttachment : onAnalyzeAttachment
+    ? copy.checking
+    : attachmentAnalysisMode
+      ? copy.checkAgain
+      : copy.styleCheck
+  const actionHandler = attachmentAnalysisMode === 'rating' ? onAnalyzeAttachment : onRateAttachment
+  const firstImageFile = (files: FileList | File[]) => {
+    return Array.from(files).find((file) => file.type.startsWith('image/')) || null
+  }
+  const clipboardImageFile = (event: ClipboardEvent<HTMLInputElement>) => {
+    const pastedFile = firstImageFile(event.clipboardData.files)
+    if (pastedFile) return pastedFile
+
+    const imageItem = Array.from(event.clipboardData.items).find((item) => item.kind === 'file' && item.type.startsWith('image/'))
+    return imageItem?.getAsFile() || null
+  }
+  const hasImageFile = (event: DragEvent<HTMLElement>) => {
+    return Array.from(event.dataTransfer.items || []).some((item) => item.kind === 'file' && item.type.startsWith('image/'))
+      || Array.from(event.dataTransfer.files || []).some((file) => file.type.startsWith('image/'))
+  }
+  const attachDroppedPhoto = async (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setDraggingPhoto(false)
+    const file = firstImageFile(event.dataTransfer.files)
+    if (file) await handleAttachmentFile(file)
+  }
+  const attachPastedPhoto = async (event: ClipboardEvent<HTMLInputElement>) => {
+    const file = clipboardImageFile(event)
+    if (!file) return
+    event.preventDefault()
+    event.stopPropagation()
+    await handleAttachmentFile(file)
+  }
 
   return (
     <div
@@ -101,8 +149,30 @@ export default function SearchFooter({
         paddingBottom: keyboardOffset > 0 ? '0.75rem' : 'max(1.25rem, env(safe-area-inset-bottom))',
         transition: 'bottom 120ms ease-out',
       }}
+      onDragEnter={(event) => {
+        if (!hasImageFile(event)) return
+        event.preventDefault()
+        setDraggingPhoto(true)
+      }}
+      onDragOver={(event) => {
+        if (!hasImageFile(event)) return
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'copy'
+        setDraggingPhoto(true)
+      }}
+      onDragLeave={(event) => {
+        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
+        setDraggingPhoto(false)
+      }}
+      onDrop={attachDroppedPhoto}
     >
       <div className="relative max-w-md mx-auto">
+        {draggingPhoto ? (
+          <div className="absolute inset-x-0 bottom-0 z-20 min-h-[72px] rounded-[1.75rem] border border-white/30 bg-white/10 backdrop-blur-xl shadow-[0_0_40px_rgba(255,255,255,0.08)] flex items-center justify-center pointer-events-none">
+            <span className="text-[10px] uppercase tracking-[0.28em] text-white/85">{copy.dropPhoto}</span>
+          </div>
+        ) : null}
+
         <input
           type="file"
           ref={fileInputRef}
@@ -151,14 +221,25 @@ export default function SearchFooter({
                       </span>
                     )) : (
                       <span className="px-2.5 py-1 rounded-full border border-zinc-800 bg-black/25 text-[10px] text-zinc-500">
-                        {isAr ? 'جاهز للتحليل' : 'Ready to analyze'}
+                        {copy.readyToAnalyze}
                       </span>
                     )}
-                    {attachmentAnalysis?.color_names?.slice(0, 4).map((color) => (
+                    {hexColors.length > 0 ? (
+                      <div className="flex items-center gap-1.5 ml-0.5">
+                        {hexColors.slice(0, 5).map((hex, i) => (
+                          <div
+                            key={`${hex}-${i}`}
+                            className="w-4 h-4 rounded-full border border-zinc-700/60 flex-shrink-0"
+                            style={{ backgroundColor: hex }}
+                            title={attachmentAnalysis?.color_names?.[i] || hex}
+                          />
+                        ))}
+                      </div>
+                    ) : attachmentAnalysis?.color_names?.length ? attachmentAnalysis.color_names.slice(0, 3).map((color) => (
                       <span key={color} className="px-2.5 py-1 rounded-full border border-zinc-800 bg-black/25 text-[10px] text-zinc-400">
                         {color}
                       </span>
-                    ))}
+                    )) : null}
                   </div>
                 </div>
                 <button
@@ -175,6 +256,7 @@ export default function SearchFooter({
 
         <div className={`flex items-center gap-2 ${isAr ? 'flex-row-reverse' : ''}`}>
           <button
+            id="tour-camera"
             onClick={() => fileInputRef.current?.click()}
             disabled={attachment?.uploading}
             className="cursor-pointer flex-shrink-0 w-[52px] h-[56px] rounded-3xl bg-zinc-950/50 backdrop-blur-md border border-white/10 flex items-center justify-center text-zinc-400 hover:text-white hover:border-white/25 disabled:opacity-40 transition-all duration-200 shadow-[0_12px_36px_rgba(0,0,0,0.22)]"
@@ -195,6 +277,7 @@ export default function SearchFooter({
               dir={isAr ? 'rtl' : 'ltr'}
               value={inputValue}
               onChange={(event) => onInputChange(event.target.value)}
+              onPaste={attachPastedPhoto}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' && canSubmit) onSubmit()
               }}

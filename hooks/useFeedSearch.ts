@@ -5,10 +5,10 @@ import { useState } from 'react'
 import type { ReadonlyURLSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { insertGeneratedOutfit } from '@/services/outfitService'
-import { useAiSearchFlow } from '@/hooks/useAiSearchFlow'
-import { useFeedStatePersistence } from '@/hooks/useFeedStatePersistence'
+import { useAiSearchFlow, type AiContext } from '@/hooks/useAiSearchFlow'
+import { readFeedStateForQuery, useFeedStatePersistence } from '@/hooks/useFeedStatePersistence'
 import { useSearchQueryUrlSync } from '@/hooks/useFeedUi'
-import type { Outfit } from '@/types/outfit'
+import type { GeneratedOutfitResult, Outfit } from '@/types/outfit'
 
 interface FeedSearchParams {
   allOutfits: Outfit[]
@@ -27,6 +27,7 @@ interface FeedSearchParams {
   userSkinTone: string
   userStylePref: string
   language?: 'en' | 'ar'
+  ready?: boolean
 }
 
 export function useFeedSearch({
@@ -46,9 +47,11 @@ export function useFeedSearch({
   userSkinTone,
   userStylePref,
   language = 'en',
+  ready = true,
 }: FeedSearchParams) {
-  const [searchQuery, setSearchQueryState] = useState(initialQuery)
-  const [inputValue, setInputValue] = useState(initialQuery)
+  const restoredState = useState(() => readFeedStateForQuery<AiContext, GeneratedOutfitResult>(initialQuery))[0]
+  const [searchQuery, setSearchQueryState] = useState(restoredState?.searchQuery || initialQuery)
+  const [inputValue, setInputValue] = useState(restoredState?.inputValue || initialQuery)
   const [curateTriggered, setCurateTriggered] = useState(false)
   const {
     aiContext,
@@ -80,7 +83,14 @@ export function useFeedSearch({
     userHeight,
     userSkinTone,
     userStylePref,
+    initialAiContext: restoredState?.aiContext || null,
+    initialChatHistory: restoredState?.chatHistory || [],
+    initialCompletedQuery: restoredState?.searchQuery || '',
+    initialFinalBanner: restoredState?.finalBanner || null,
+    initialGeneratedIds: restoredState?.generatedIds || {},
+    initialGeneratedOutfit: restoredState?.generatedOutfit || null,
     language,
+    ready,
   })
   const setSearchQuery = (value: string) => {
     if (value !== searchQuery) setCurateTriggered(false)
@@ -93,15 +103,7 @@ export function useFeedSearch({
     generatedIds,
     generatedOutfit,
     inputValue,
-    searchParams,
     searchQuery,
-    setAiContext,
-    setChatHistory,
-    setFinalBanner,
-    setGeneratedIds,
-    setGeneratedOutfit,
-    setInputValue,
-    setSearchQuery,
   })
 
   useSearchQueryUrlSync(searchQuery, searchParams, replaceUrl)
@@ -137,6 +139,12 @@ export function useFeedSearch({
       if (inserted?.id) {
         generatedIdsRef.current = { ...generatedIdsRef.current, [type]: inserted.id }
         setGeneratedIds((prev) => ({ ...prev, [type]: inserted.id }))
+        setGeneratedOutfit((previous) => {
+          if (!previous || !inserted.image_url) return previous
+          return isAlternative
+            ? { ...previous, alternative_image_url: inserted.image_url }
+            : { ...previous, image_url: inserted.image_url }
+        })
         saveFeedState()
         onNavigateToOutfit(inserted.id)
       }

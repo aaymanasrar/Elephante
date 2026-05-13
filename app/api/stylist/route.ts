@@ -6,7 +6,10 @@ import { generateMagnificMysticImage, hasMagnificImageConfig } from '@/lib/magni
 import { getOpenAIKeys, isOpenAIQuotaError } from '@/lib/openaiKeys'
 import { rateLimit } from '@/lib/rateLimit'
 import { buildCatalogMannequinImagePrompt } from '@/lib/outfitImagePrompt'
+import { generateSkyworkImage, hasSkyworkImageConfig } from '@/lib/skyworkImage'
 import { chatWithFallback } from '@/services/aiProviders'
+
+export const maxDuration = 300
 
 function sanitizeOccasion(value: string) {
   return value.replace(/[^\p{L}\p{N}\s,.'-]/gu, ' ').replace(/\s+/g, ' ').trim()
@@ -17,6 +20,16 @@ async function generateImage(description: string): Promise<string> {
     pieces: [description],
     extraDetails: ['occasion-based AI stylist outfit visualization'],
   })
+
+  if (hasSkyworkImageConfig()) {
+    try {
+      const { dataUrl } = await generateSkyworkImage(fullPrompt)
+      return dataUrl
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      console.warn('[stylist] Skywork failed:', message)
+    }
+  }
 
   if (hasMagnificImageConfig()) {
     try {

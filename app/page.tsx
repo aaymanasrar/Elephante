@@ -6,6 +6,7 @@ import Logo from '@/components/Logo'
 import Noise from '@/components/Noise'
 import Particles from '@/components/Particles'
 import { useLocale } from '@/lib/locale-context'
+import LanguageToggle from '@/app/components/LanguageToggle'
 
 const T = {
   en: {
@@ -47,6 +48,7 @@ export default function Home() {
       className="min-h-screen bg-black text-white flex flex-col items-center justify-center relative overflow-hidden selection:bg-zinc-800"
       dir={isAr ? 'rtl' : 'ltr'}
     >
+      <LanguageToggle />
       <Noise patternAlpha={25} patternRefreshInterval={3} />
       <Particles
         particleCount={120}

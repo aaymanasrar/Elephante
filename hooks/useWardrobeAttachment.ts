@@ -17,6 +17,7 @@ export interface WardrobeAttachment {
   storage_path: string
   item_name: string
   item_type: string
+  pieces: string[]
   color: string
   occasion: string
   style_query: string
@@ -34,8 +35,7 @@ export function useWardrobeAttachment(userId: string, onStyleQuery: (query: stri
     return { Authorization: `Bearer ${session.access_token}` }
   }
 
-  const handleAttachment = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
+  const attachFile = async (file: File | null | undefined) => {
     if (!file) return
 
     if (attachment?.preview) URL.revokeObjectURL(attachment.preview)
@@ -48,6 +48,7 @@ export function useWardrobeAttachment(userId: string, onStyleQuery: (query: stri
       storage_path: '',
       item_name: 'Identifying...',
       item_type: 'top',
+      pieces: [],
       color: '',
       occasion: '',
       style_query: '',
@@ -84,6 +85,7 @@ export function useWardrobeAttachment(userId: string, onStyleQuery: (query: stri
         storage_path: data.storage_path,
         item_name: data.item_name,
         item_type: data.item_type,
+        pieces: Array.isArray(data.pieces) ? data.pieces : [],
         color: data.color || '',
         occasion: data.occasion || '',
         style_query: data.style_query || '',
@@ -95,6 +97,10 @@ export function useWardrobeAttachment(userId: string, onStyleQuery: (query: stri
     }
 
     if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  const handleAttachment = async (event: ChangeEvent<HTMLInputElement>) => {
+    await attachFile(event.target.files?.[0])
   }
 
   const updateTag = (id: WardrobeTag['id'], label: string) => {
@@ -132,6 +138,7 @@ export function useWardrobeAttachment(userId: string, onStyleQuery: (query: stri
           storage_path: attachment.storage_path,
           item_name: attachment.item_name,
           item_type: attachment.item_type,
+          pieces: attachment.pieces,
           color: attachment.color,
           occasion: attachment.occasion,
           style_query: attachment.style_query || `style this ${attachment.item_type}`,
@@ -163,6 +170,7 @@ export function useWardrobeAttachment(userId: string, onStyleQuery: (query: stri
     clearAttachment,
     confirmAttachment,
     fileInputRef,
+    attachFile,
     handleAttachment,
     updateTag,
   }

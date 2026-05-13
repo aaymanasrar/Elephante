@@ -1,5 +1,4 @@
 import { supabase } from '@/lib/supabase'
-import { buildGeneratedOutfitRow } from '@/lib/generatedOutfitRow'
 import type { GeneratedOutfitVariant } from '@/types/outfit'
 
 interface AiStylistOutfitLike {
@@ -23,6 +22,54 @@ function normalizeOptionalText(value?: string | null) {
   return value && value !== 'None' && value !== 'null' ? value : null
 }
 
+async function authHeaders(): Promise<Record<string, string>> {
+  const { data: { session } } = await supabase.auth.getSession()
+  return session?.access_token
+    ? { Authorization: `Bearer ${session.access_token}` }
+    : {}
+}
+
+async function saveGeneratedOutfits(body: Record<string, unknown>) {
+  const response = await fetch('/api/generated-outfits/save', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...await authHeaders(),
+    },
+    body: JSON.stringify(body),
+  })
+
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    return {
+      saved: [],
+      error: new Error(typeof data?.error === 'string' ? data.error : `generated outfit save failed (${response.status})`),
+    }
+  }
+
+  return {
+    saved: Array.isArray(data?.saved) ? data.saved : [],
+    error: null,
+  }
+}
+
+function toGeneratedVariant(outfit: AiStylistOutfitLike, gender?: string | null): GeneratedOutfitVariant {
+  return {
+    outfit_name: outfit.outfit_name || outfit.style || 'Styled Look',
+    style: outfit.style || null,
+    color_scheme: outfit.color_scheme || '',
+    top_wear: outfit.pieces?.top?.item || null,
+    bottom_wear: outfit.pieces?.bottom?.item || null,
+    shoes: outfit.pieces?.shoes?.item || null,
+    outerwear: normalizeOptionalText(outfit.pieces?.outerwear?.item),
+    accessories: normalizeOptionalText(outfit.pieces?.accessories?.item),
+    occasions: outfit.occasion || null,
+    outfit_details: [outfit.why_it_works, outfit.styling_tip].filter(Boolean).join('\n\n') || null,
+    key_colors: outfit.key_colors || null,
+    gender: gender || 'male',
+  }
+}
+
 export async function insertGeneratedOutfit(generated: GeneratedOutfitVariant | null | undefined, options: {
   type: 'primary' | 'alternative'
   primaryOutfit: GeneratedOutfitVariant | null | undefined
@@ -35,76 +82,44 @@ export async function insertGeneratedOutfit(generated: GeneratedOutfitVariant | 
     }
   }
 
-  const row = buildGeneratedOutfitRow(generated, {
-    isAlternative: options.type === 'alternative',
+  const { saved, error } = await saveGeneratedOutfits({
+    type: options.type,
+    outfit: generated,
     primaryOutfit: options.primaryOutfit ?? generated,
-    imageUrl: options.imageUrl,
-    sourceKey: `${Date.now()}_${options.type}`,
+    image_url: options.imageUrl,
   })
 
-  return supabase
-    .from('excel_outfits')
-    .insert(row)
-    .select('id')
-    .single()
+  return {
+    data: saved[0] ? { id: saved[0].id, image_url: saved[0].image_url } : null,
+    error,
+  }
 }
 
 export async function insertGeneratedOutfitBatch(primaryOutfit: GeneratedOutfitVariant & { alternative?: GeneratedOutfitVariant | null }, options: {
   primaryImageUrl: string | null | undefined
   alternativeImageUrl?: string | null | undefined
 }) {
-  const sourceKey = String(Date.now())
-  const rows: any[] = [buildGeneratedOutfitRow(primaryOutfit, {
-    isAlternative: false,
-    primaryOutfit,
-    imageUrl: options.primaryImageUrl,
-    sourceKey,
-  })]
-
-  if (primaryOutfit.alternative) {
-    rows.push(buildGeneratedOutfitRow(primaryOutfit.alternative, {
-      isAlternative: true,
-      primaryOutfit,
-      imageUrl: options.alternativeImageUrl,
-      sourceKey,
-    }))
-  }
-
-  return supabase
-    .from('excel_outfits')
-    .insert(rows)
-    .select('id')
-}
-
-export async function saveAiStylistOutfit(outfit: AiStylistOutfitLike, userId: string, gender?: string | null) {
-  const { data: inserted, error: insertErr } = await supabase
-    .from('excel_outfits')
-    .insert({
-      source_id: `ai_stylist_${Date.now()}`,
-      style_category: outfit.outfit_name || outfit.style || 'AI Look',
-      color_scheme: outfit.color_scheme || '',
-      top_wear: outfit.pieces?.top?.item || null,
-      bottom_wear: outfit.pieces?.bottom?.item || null,
-      shoes: outfit.pieces?.shoes?.item || null,
-      outerwear: normalizeOptionalText(outfit.pieces?.outerwear?.item),
-      accessories: normalizeOptionalText(outfit.pieces?.accessories?.item),
-      occasions: outfit.occasion || null,
-      outfit_details: [outfit.why_it_works, outfit.styling_tip].filter(Boolean).join('\n\n') || null,
-      hex_colors: outfit.key_colors || null,
-      gender: gender || 'male',
-    })
-    .select('id')
-    .single()
-
-  if (insertErr || !inserted?.id) {
-    return { inserted: null, error: insertErr }
-  }
-
-  const { error: saveErr } = await supabase.from('saved_outfits').insert({
-    user_id: userId,
-    outfit_ref: inserted.id,
-    source: 'excel',
+  const { saved, error } = await saveGeneratedOutfits({
+    outfit: primaryOutfit,
+    image_url: options.primaryImageUrl,
+    alternative_image_url: options.alternativeImageUrl,
   })
 
-  return { inserted, error: saveErr }
+  return {
+    data: saved.map((item: { id: string; image_url?: string | null }) => ({ id: item.id, image_url: item.image_url || null })),
+    error,
+  }
+}
+
+export async function saveAiStylistOutfit(outfit: AiStylistOutfitLike, _userId: string, gender?: string | null, imageUrl?: string | null) {
+  const { saved, error } = await saveGeneratedOutfits({
+    type: 'primary',
+    outfit: toGeneratedVariant(outfit, gender),
+    image_url: imageUrl || null,
+  })
+
+  return {
+    inserted: saved[0] ? { id: saved[0].id } : null,
+    error,
+  }
 }

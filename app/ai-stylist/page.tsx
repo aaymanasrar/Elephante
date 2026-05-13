@@ -147,7 +147,7 @@ function OutfitCard({
 }: {
   outfit: Outfit
   index: number
-  onSave: (o: Outfit) => void
+  onSave: (o: Outfit, imageUrl?: string | null) => void
   saved: boolean
   gender: Gender
   profile: Profile | null
@@ -171,7 +171,7 @@ function OutfitCard({
       })
       const data = await res.json()
       if (data.error) { setImgError(data.error); return }
-      setGeneratedImage(data.image)
+      setGeneratedImage(data.resourceUrl || data.image)
     } catch {
       setImgError(copy.imageError)
     } finally {
@@ -314,7 +314,7 @@ function OutfitCard({
         </button>
         {imgError && <p className="text-red-400 text-[11px] text-center">{imgError}</p>}
         <button
-          onClick={() => !saved && onSave(outfit)}
+          onClick={() => !saved && onSave(outfit, generatedImage)}
           disabled={saved}
           className={`w-full h-11 rounded-full text-[10px] font-bold uppercase tracking-[0.3em] transition-all duration-300 active:scale-95 ${
             saved ? 'bg-zinc-900 text-zinc-600 border border-zinc-800 cursor-default' : 'bg-white text-black hover:bg-zinc-200'
@@ -383,10 +383,10 @@ export default function AIStylist() {
     }
   }
 
-  const saveOutfit = async (outfit: Outfit) => {
+  const saveOutfit = async (outfit: Outfit, imageUrl?: string | null) => {
     if (!profile?.userId) return
 
-    const { inserted, error } = await saveAiStylistOutfit(outfit, profile.userId, profile?.gender)
+    const { inserted, error } = await saveAiStylistOutfit(outfit, profile.userId, profile?.gender, imageUrl)
 
     if (error || !inserted?.id) {
       console.error('[ai-stylist] save failed:', error?.message)

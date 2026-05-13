@@ -402,6 +402,12 @@ export default function Register() {
             </Link>
           </p>
 
+          <p className="text-center mt-6">
+            <Link href="/privacy" className="text-zinc-700 hover:text-zinc-500 text-[10px] tracking-widest uppercase transition-colors">
+              {isAr ? 'سياسة الخصوصية' : 'Privacy Policy'}
+            </Link>
+          </p>
+
         </div>
       </div>
 

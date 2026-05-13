@@ -1,7 +1,9 @@
 {
   "functions": {
     "app/api/outfit-ai/route.ts": { "maxDuration": 60 },
+    "app/api/outfit-generate/route.ts": { "maxDuration": 300 },
+    "app/api/generate-outfit-image/route.ts": { "maxDuration": 300 },
     "app/api/product-search/route.ts": { "maxDuration": 30 },
-    "app/api/stylist/route.ts": { "maxDuration": 60 }
+    "app/api/stylist/route.ts": { "maxDuration": 300 }
   }
 }

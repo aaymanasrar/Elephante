@@ -2,12 +2,18 @@
 
 import { usePathname } from 'next/navigation'
 import { useLocale } from '@/lib/locale-context'
+import { useEffect, useState } from 'react'
 
 export default function LanguageToggle() {
   const pathname = usePathname()
   const { lang, setLang, isAr } = useLocale()
+  const [mounted, setMounted] = useState(false)
 
-  if (pathname === '/feed') return null
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  if (!mounted || pathname === '/feed') return null
 
   return (
     <button

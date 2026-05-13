@@ -4,7 +4,11 @@ import { getOpenAIKeys, isOpenAIQuotaError } from '@/lib/openaiKeys'
 import { downloadImageAsDataUrl, generateEdenAIImage, hasEdenAIImageConfig } from '@/lib/edenaiImage'
 import { generateMagnificMysticImage, hasMagnificImageConfig } from '@/lib/magnificImage'
 import { buildCatalogMannequinImagePrompt } from '@/lib/outfitImagePrompt'
+import { generateSkyworkImage, hasSkyworkImageConfig } from '@/lib/skyworkImage'
+import { generateFalImage, hasFalImageConfig } from '@/lib/falImage'
 import type { Outfit } from '@/types/outfit'
+
+export const maxDuration = 300
 
 interface Profile {
   gender?: string | null
@@ -105,17 +109,40 @@ async function generateWithHiggsfield(prompt: string): Promise<string> {
   throw new Error('Higgsfield generation timed out after 90 s')
 }
 
-// ── DALL-E 3 (OpenAI — best at following detailed garment descriptions) ───────
+// ── GPT Image 2 (gpt-image-1 — best prompt adherence, photorealistic) ────────
+async function generateWithGptImage2(prompt: string, apiKey: string): Promise<string> {
+  const client = new OpenAI({ apiKey, timeout: 90_000 })
+
+  const enhancedPrompt = `Fashion product catalog photograph. ${prompt}. Pure white seamless studio background, full-body centered composition showing the complete outfit from head to shoes. Soft even studio lighting, crisp realistic garment texture, professional product photography. Smooth white faceless mannequin, no facial features, no skin, no hair. No text, no watermarks, no props.`
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const response = await (client.images.generate as any)({
+    model:   'gpt-image-1',
+    prompt:  enhancedPrompt,
+    size:    '1024x1536',
+    quality: 'high',
+    n:       1,
+  }) as { data?: Array<{ b64_json?: string; url?: string }> }
+
+  const b64 = response.data?.[0]?.b64_json
+  if (b64) return `data:image/png;base64,${b64}`
+
+  const imageUrl = response.data?.[0]?.url
+  if (imageUrl) return downloadImageAsDataUrl(imageUrl, 'GPT Image 2')
+
+  throw new Error('GPT Image 2: no image data in response')
+}
+
+// ── DALL-E 3 (OpenAI — fallback, good at detailed garment descriptions) ───────
 async function generateWithDallE3(prompt: string, apiKey: string): Promise<string> {
   const client = new OpenAI({ apiKey, timeout: 60_000 })
 
-  // DALL-E 3 needs a clear, structured description — prepend a fashion photo context
   const dallePrompt = `${prompt}. Maintain the exact archive style: a smooth white faceless mannequin on a pure white background, full-body centered product photo.`
 
   const response = await client.images.generate({
     model:   'dall-e-3',
     prompt:  dallePrompt,
-    size:    '1024x1792',   // portrait 9:16
+    size:    '1024x1792',
     quality: 'standard',
     n:       1,
   })
@@ -158,7 +185,29 @@ export async function POST(req: NextRequest) {
     const { outfit, profile } = await req.json()
     const prompt = buildPrompt(outfit, profile)
 
-    // 1. Magnific Mystic — premium high-resolution realism
+    // 1. FAL.ai — FLUX Pro v1.1, photorealistic fashion quality
+    if (hasFalImageConfig()) {
+      try {
+        const { dataUrl, model } = await generateFalImage(prompt)
+        return NextResponse.json({ image: dataUrl, provider: 'fal-flux-pro', model })
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error'
+        console.warn('[generate-outfit-image] FAL.ai failed:', message)
+      }
+    }
+
+    // 3. Skywork Image API — configured through SKYWORK_API_KEY
+    if (hasSkyworkImageConfig()) {
+      try {
+        const { dataUrl, model, resourceUrl } = await generateSkyworkImage(prompt)
+        return NextResponse.json({ image: dataUrl, provider: 'skywork', model, resourceUrl })
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error'
+        console.warn('[generate-outfit-image] Skywork failed:', message)
+      }
+    }
+
+    // 4. Magnific Mystic — premium high-resolution realism
     if (hasMagnificImageConfig()) {
       try {
         const { dataUrl, model, taskId } = await generateMagnificMysticImage(prompt)
@@ -169,7 +218,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 2. EdenAI — ByteDance Seedream through the Universal AI endpoint
+    // 5. EdenAI — ByteDance Seedream through the Universal AI endpoint
     if (hasEdenAIImageConfig()) {
       try {
         const { dataUrl, cost, model } = await generateEdenAIImage(prompt)
@@ -180,7 +229,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 3. Higgsfield — FLUX Pro, highest quality cinematic fashion
+    // 6. Higgsfield — FLUX Pro, highest quality cinematic fashion
     if (process.env.HIGGSFIELD_API_KEY_ID && process.env.HIGGSFIELD_API_KEY_SECRET) {
       try {
         const image = await generateWithHiggsfield(prompt)
@@ -191,9 +240,30 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 4. DALL-E 3 — best at following detailed garment/styling descriptions
+    // 7. GPT Image 2 (gpt-image-1) — highest prompt adherence, photorealistic
     const openAIKeys = getOpenAIKeys()
     if (openAIKeys.length > 0) {
+      try {
+        let lastGptImg2Error: unknown = null
+        for (const [index, apiKey] of openAIKeys.entries()) {
+          try {
+            const image = await generateWithGptImage2(prompt, apiKey)
+            return NextResponse.json({ image, provider: index === 0 ? 'gpt-image-2' : `gpt-image-2-backup-${index + 1}` })
+          } catch (err) {
+            lastGptImg2Error = err
+            const message = err instanceof Error ? err.message : 'Unknown error'
+            const keyLabel = index === 0 ? 'primary key' : `backup key ${index + 1}`
+            const reason = isOpenAIQuotaError(err) ? 'quota/rate limit' : message
+            console.warn(`[generate-outfit-image] GPT Image 2 failed with ${keyLabel}:`, reason)
+          }
+        }
+        if (lastGptImg2Error) throw lastGptImg2Error
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error'
+        console.warn('[generate-outfit-image] All GPT Image 2 keys failed, trying DALL-E 3:', message)
+      }
+
+      // 8. DALL-E 3 — fallback if gpt-image-1 unavailable
       try {
         let lastDallEError: unknown = null
         for (const [index, apiKey] of openAIKeys.entries()) {
@@ -208,7 +278,6 @@ export async function POST(req: NextRequest) {
             console.warn(`[generate-outfit-image] DALL-E 3 failed with ${keyLabel}:`, reason)
           }
         }
-
         if (lastDallEError) throw lastDallEError
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error'
@@ -216,7 +285,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 5. Pollinations — free fallback (FLUX)
+    // 8. Pollinations — free fallback (FLUX)
     const image = await generateWithPollinations(prompt)
     return NextResponse.json({ image, provider: 'pollinations' })
   } catch (err: unknown) {

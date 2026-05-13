@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import LoadingScreen from '@/app/components/LoadingScreen'
 import ParticleCanvas from '@/components/ParticleCanvas'
@@ -318,6 +319,12 @@ export default function ProfileDashboard() {
           >
             {copy.signOut}
           </button>
+
+          <div className="text-center mt-4">
+            <Link href="/privacy" className={`text-zinc-700 hover:text-zinc-500 text-[10px] transition-colors ${isAr ? '' : 'tracking-widest uppercase'}`}>
+              {isAr ? 'سياسة الخصوصية' : 'Privacy Policy'}
+            </Link>
+          </div>
 
         </div>
       </div>

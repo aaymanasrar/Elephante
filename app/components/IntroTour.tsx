@@ -10,7 +10,7 @@ interface Step {
   description: string
   descriptionAr: string
   targetId: string
-  preferredPlacement: 'bottom' | 'left'
+  preferredPlacement: 'bottom' | 'left' | 'top' | 'right'
 }
 
 const STEPS: Step[] = [

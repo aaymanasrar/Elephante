@@ -25,12 +25,11 @@ type ExtractedImage = {
   aiEdited: boolean
 }
 
-const WARDROBE_PRETTIFY_PROMPT = `Create a clean wardrobe catalog image from the supplied clothing photo.
-Preserve the exact visible garments and accessories: color, print, logos, silhouette, fabric texture, length, and fit.
-Remove the room, hands, hanger, floor, mirror, clutter, hard shadows, and background.
-Center the item or outfit on a transparent background with soft, even studio lighting, like an ecommerce wardrobe cutout.
-If the clothing is being worn and hidden body areas cannot be reconstructed confidently, keep only the minimal neutral mannequin/body shape needed to preserve the outfit accurately.
-Do not add labels, text, watermarks, extra accessories, new garments, hangers, props, or decorative backgrounds.`
+const WARDROBE_PRETTIFY_PROMPT = `Create a clean ecommerce catalog cutout from this clothing photo.
+Preserve the exact garment: color, print, logos, silhouette, fabric texture, length, fit, and all details.
+Remove everything that is not the garment itself — background, room, floor, hands, hanger, model's face, skin, hair, and body.
+Present the garment as a ghost mannequin (invisible body, garment retains its 3-D shape) or a flat-lay on a transparent background, with soft even studio lighting.
+Never show any visible face, skin, hair, or body parts. No text, watermarks, extra props, or decorative elements.`
 
 function normalizePrettifyQuality(value?: string): PrettifyQuality {
   if (value === 'low' || value === 'medium' || value === 'high' || value === 'auto') return value

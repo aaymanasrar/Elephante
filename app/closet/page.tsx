@@ -300,19 +300,6 @@ function parseClosetSection(value?: string | null): ClosetSection | null {
   return value === 'all' || value === 'curated' || value === 'stylist' || value === 'personal' ? value : null
 }
 
-function initialClosetSection(): ClosetSection {
-  if (typeof window === 'undefined') return 'all'
-
-  const urlSection = parseClosetSection(new URLSearchParams(window.location.search).get('section'))
-  if (urlSection) return urlSection
-
-  try {
-    return parseClosetSection(window.localStorage.getItem('elephante_closet_section')) || 'all'
-  } catch {
-    return 'all'
-  }
-}
-
 function closetSectionForSource(source?: ClosetSource): Exclude<ClosetSection, 'all'> {
   if (source === 'manual') return 'personal'
   if (source === 'ai_stylist') return 'stylist'
@@ -339,32 +326,6 @@ function inferClosetSource(source?: string | null, outfit?: Outfit | null): Clos
   return normalized
 }
 
-function outfitFromGenerated(id: string, generated: GeneratedOutfitVariant, imageUrl: string | null, closetSource: ClosetSource): ClosetOutfit {
-  return {
-    id,
-    _source: 'excel',
-    _closetSource: closetSource,
-    image_url: imageUrl,
-    outfit_name: generated.outfit_name,
-    style_category: generated.outfit_name || generated.style || 'Uploaded Closet Look',
-    style: generated.style,
-    color_scheme: generated.color_scheme,
-    top_wear: generated.top_wear,
-    bottom_wear: generated.bottom_wear,
-    shoes: generated.shoes,
-    accessories: generated.accessories,
-    outerwear: generated.outerwear,
-    occasions: generated.occasions,
-    when_to_wear: generated.when_to_wear,
-    outfit_details: generated.outfit_details,
-    material_top: generated.material_top,
-    material_bottom: generated.material_bottom,
-    material_shoes: generated.material_shoes,
-    hex_colors: generated.key_colors,
-    gender: generated.gender,
-  }
-}
-
 function buildFromOutfitPrompt(outfit: Outfit) {
   const label = outfit.outfit_name || outfit.style_category || outfit.style || 'this outfit'
   const pieces = [
@@ -376,41 +337,6 @@ function buildFromOutfitPrompt(outfit: Outfit) {
   ].filter(Boolean).join(', ')
   const palette = outfit.color_scheme ? ` Palette: ${outfit.color_scheme}.` : ''
   return `Build something from my uploaded outfit "${label}"${pieces ? ` using these pieces as the base: ${pieces}.` : '.'}${palette} Do not start from Elephante curated looks unless you need a complementary piece.`
-}
-
-function asMissingOutfitPieces(value: unknown): MissingOutfitPiece[] {
-  if (!Array.isArray(value)) return []
-  const ids = value
-    .map((item) => {
-      if (typeof item === 'string') return item
-      if (item && typeof item === 'object' && 'id' in item) return (item as { id?: unknown }).id
-      return null
-    })
-    .filter((item): item is MissingOutfitPiece => item === 'top_wear' || item === 'bottom_wear' || item === 'shoes')
-
-  return Array.from(new Set(ids))
-}
-
-function completeOutfitWithMissingAnswers(outfit: GeneratedOutfitVariant, answers: Partial<Record<MissingOutfitPiece, string>>): GeneratedOutfitVariant {
-  const completed = { ...outfit }
-  const additions: string[] = []
-
-  for (const field of ['top_wear', 'bottom_wear', 'shoes'] as const) {
-    const value = answers[field]?.trim()
-    if (!value) continue
-
-    completed[field] = value
-    additions.push(`${field.replace('_wear', '').replace('_', ' ')}: ${value}`)
-  }
-
-  if (additions.length) {
-    completed.outfit_details = [
-      completed.outfit_details,
-      `User supplied missing pieces: ${additions.join('; ')}.`,
-    ].filter(Boolean).join('\n\n')
-  }
-
-  return completed
 }
 
 function ClosetImage({ outfit, label }: { outfit: Outfit; label: string }) {
@@ -965,6 +891,7 @@ export default function ClosetPage() {
           {filteredPersonalItems.map((item) => {
             const isSelected = selectedItemIds.has(item.id)
             const label = item.item_name || (isAr ? 'قطعة' : 'Item')
+            const colorNames = item.color ? item.color.split(',').map((c: string) => c.trim()).filter(Boolean).slice(0, 3) : []
             return (
               <div
                 key={item.id}
@@ -974,24 +901,35 @@ export default function ClosetPage() {
                   else toggleItemSelection(item.id)
                 }}
               >
-                <div className={`relative w-full aspect-[3/4] overflow-hidden rounded-xl bg-zinc-900/80 border transition-all duration-300 ${
+                <div className={`relative w-full aspect-[3/4] overflow-hidden rounded-2xl bg-white transition-all duration-200 ${
                   isSelected
-                    ? 'border-white shadow-[0_0_0_2px_rgba(255,255,255,0.5)]'
-                    : 'border-zinc-800/60 group-hover:border-zinc-600'
+                    ? 'ring-2 ring-white shadow-[0_0_0_2px_rgba(255,255,255,0.4)]'
+                    : 'ring-1 ring-zinc-800/40 group-hover:ring-zinc-600/60'
                 }`}>
                   {item.image_url ? (
                     <img
                       src={item.image_url}
                       alt={label}
-                      className="w-full h-full object-contain p-1"
+                      className="w-full h-full object-contain p-2"
                       loading="lazy"
                     />
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center text-zinc-700 text-[9px] uppercase tracking-widest">
+                    <div className="w-full h-full flex items-center justify-center text-zinc-400 text-[9px] uppercase tracking-widest bg-zinc-950">
                       {isAr ? 'لا صورة' : 'No image'}
                     </div>
                   )}
-                  {selectMode ? (
+
+                  {/* Category badge */}
+                  {item.category && !selectMode && (
+                    <div className={`absolute top-2 ${isAr ? 'right-2' : 'left-2'}`}>
+                      <span className="px-1.5 py-0.5 rounded-full bg-black/60 backdrop-blur-sm text-[7px] uppercase tracking-widest text-white/70">
+                        {item.category}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Select checkbox */}
+                  {selectMode && (
                     <div className={`absolute top-2 ${isAr ? 'left-2' : 'right-2'} w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all ${
                       isSelected ? 'bg-white border-white' : 'border-zinc-400 bg-black/60'
                     }`}>
@@ -1001,15 +939,14 @@ export default function ClosetPage() {
                         </svg>
                       )}
                     </div>
-                  ) : (
-                    <div className="absolute bottom-0 left-0 right-0 px-2 py-1.5 bg-gradient-to-t from-black/80 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                      <p className="text-[8px] uppercase tracking-[0.2em] text-zinc-300 truncate">{item.category}</p>
-                    </div>
                   )}
                 </div>
-                <div className="mt-1.5">
-                  <p className="text-[9px] text-zinc-500 truncate leading-snug group-hover:text-zinc-300 transition-colors">{label}</p>
-                  {item.color ? <p className="text-[8px] text-zinc-800 truncate">{item.color}</p> : null}
+
+                <div className="mt-1.5 px-0.5">
+                  <p className="text-[9px] font-medium text-zinc-300 truncate leading-snug group-hover:text-white transition-colors">{label}</p>
+                  {colorNames.length > 0 && (
+                    <p className="text-[8px] text-zinc-600 truncate mt-0.5">{colorNames.join(' · ')}</p>
+                  )}
                 </div>
               </div>
             )

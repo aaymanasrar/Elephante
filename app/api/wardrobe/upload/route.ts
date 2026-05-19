@@ -25,13 +25,27 @@ const MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 const WARDROBE_PROMPT = `You are a fashion AI. Analyse this clothing image and return ONLY a raw JSON object (no markdown, no code blocks):
 {
   "item_name": "short descriptive name e.g. 'White linen shirt', 'Black slim chinos', 'Chunky white sneakers'",
-  "item_type": "one of: top, bottom, shoes, outerwear, accessory, full outfit, Thobe / Kandura, Bisht, Abaya, Keffiyeh / Ghitra, Agal, Pocket Square, Cufflinks, Dress Watch, Suit, Dress Shirt, Blazer / Sport Coat",
-  "pieces": ["every visible garment/accessory as a separate string, e.g. 'white linen shirt', 'black slim trousers', 'silver watch'"],
+  "item_type": "MUST be exactly one of these values: top | bottom | shoes | outerwear | accessory | full outfit | thobe | bisht | abaya | keffiyeh | agal",
+  "pieces": ["every visible garment/accessory as a separate string"],
   "color": "primary colour name e.g. 'White', 'Navy', 'Olive'",
-  "occasion": "one suitable occasion e.g. 'Office', 'Weekend', 'Wedding Guest', 'Eid Al-Fitr / Eid Al-Adha', 'Ramadan', 'Saudi National Day / UAE National Day', 'Majlis', 'Formal Meeting', 'Friday Prayer'",
-  "style_query": "a natural search query Elephante should use e.g. 'outfits to wear with white linen shirt', 'style black slim chinos for smart casual'"
+  "occasion": "one suitable occasion e.g. 'Office', 'Weekend', 'Wedding Guest', 'Eid', 'Ramadan', 'Majlis', 'Formal', 'Casual'",
+  "style_query": "a natural search query e.g. 'outfits to wear with white linen shirt'"
 }
-Be specific about what is visible. If multiple images are provided, the first is the original upload and the second may be a cleaned catalog version; prefer the original for accuracy and use the cleaned version only for clarity. If the image shows a full outfit, set item_type to "full outfit", make item_name a short outfit summary, and include every visible clothing item and accessory in pieces: tops, bottoms, shoes, outerwear, bags, hats, belts, watches, jewellery, eyewear, socks, and visible layering. For Gulf/GCC traditional garments: identify Thobe/Kandura (men's full-length robe), Bisht (formal ceremonial cloak), Abaya (women's full-length robe), Keffiyeh/Ghitra (head covering), Agal (black cord for head covering). Do not invent hidden items; only include what can be seen.`
+
+Category rules — use EXACTLY these values:
+- "top": shirts, t-shirts, blouses, polos, sweaters, hoodies, tank tops, crop tops, dress shirts, tunics
+- "bottom": pants, trousers, jeans, chinos, shorts, skirts, leggings, joggers, sweatpants, culottes
+- "shoes": all footwear — sneakers, boots, heels, sandals, loafers, oxfords, slippers
+- "outerwear": jackets, coats, blazers, suits, sport coats, vests, cardigans worn as outerwear
+- "accessory": bags, belts, hats, caps, watches, jewellery, scarves, pocket squares, cufflinks, sunglasses, ties
+- "full outfit": complete head-to-toe look with multiple garments visible
+- "thobe": men's full-length robe (Thobe / Kandura / Dishdasha)
+- "bisht": formal ceremonial cloak worn over thobe
+- "abaya": women's full-length robe
+- "keffiyeh": head covering (Keffiyeh / Ghitra / Shemagh)
+- "agal": black cord worn on head covering
+
+If multiple images are provided, the first is the original upload; prefer it for accuracy. Do not invent hidden items.`
 
 function asString(value: unknown, fallback = '') {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback
@@ -106,11 +120,24 @@ async function uploadWardrobeImage(
 }
 
 function categoryFromItemType(itemType: string) {
-  const normalized = itemType.toLowerCase().trim()
-  if (normalized === 'bottom') return 'bottoms'
-  if (normalized === 'shoe' || normalized === 'shoes') return 'shoes'
-  if (normalized === 'outerwear') return 'outerwear'
-  if (normalized === 'accessory' || normalized === 'accessories') return 'accessories'
+  const n = itemType.toLowerCase().trim()
+
+  if (n === 'bottom' || n === 'bottoms' ||
+      ['pant', 'trouser', 'jean', 'chino', 'short', 'skirt', 'legging', 'jogger', 'sweatpant', 'culotte'].some(t => n.includes(t)))
+    return 'bottoms'
+
+  if (n === 'shoe' || n === 'shoes' ||
+      ['sneaker', 'boot', 'heel', 'sandal', 'loafer', 'oxford', 'slipper', 'footwear'].some(t => n.includes(t)))
+    return 'shoes'
+
+  if (n === 'outerwear' || n === 'bisht' || n === 'abaya' || n === 'thobe' ||
+      ['jacket', 'coat', 'blazer', 'suit', 'vest', 'cardigan', 'overcoat', 'windbreaker', 'parka'].some(t => n.includes(t)))
+    return 'outerwear'
+
+  if (n === 'accessory' || n === 'accessories' || n === 'keffiyeh' || n === 'agal' ||
+      ['bag', 'belt', 'hat', 'cap', 'watch', 'jewel', 'scarf', 'pocket square', 'cufflink', 'sunglass', 'tie', 'purse', 'wallet'].some(t => n.includes(t)))
+    return 'accessories'
+
   return 'tops'
 }
 

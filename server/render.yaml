@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: elephante-onnx-server
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: ELEPHANTE_SERVER_KEY
+        generateValue: true
+      - key: HF_HOME
+        value: /var/cache/huggingface
+      - key: PYTHON_VERSION
+        value: 3.11.9
+    disk:
+      name: model-cache
+      mountPath: /var/cache/huggingface
+      sizeGB: 20

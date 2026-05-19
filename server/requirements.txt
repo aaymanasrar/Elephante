@@ -1,0 +1,16 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+diffusers==0.30.3
+transformers==4.44.2
+accelerate==0.34.2
+torch==2.4.1
+torchvision==0.19.1
+onnxruntime==1.19.2
+optimum[onnxruntime]==1.22.0
+pillow==10.4.0
+scikit-learn==1.5.2
+numpy==1.26.4
+requests==2.32.3
+python-multipart==0.0.9
+rembg==2.0.57
+onnxruntime-gpu==1.19.2; sys_platform != "darwin"

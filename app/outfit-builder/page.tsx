@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useEffect, useRef, useState, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useRequireUser } from '@/hooks/useRequireUser'
 import ParticleCanvas from '@/components/ParticleCanvas'
@@ -194,98 +194,7 @@ function normalizeScore(value: unknown) {
   return Math.max(0, Math.min(100, Math.round(score)))
 }
 
-function MannequinSVG({ activeZone, onZoneClick }: {
-  activeZone: ZoneKey | null
-  onZoneClick: (z: ZoneKey) => void
-}) {
-  const zoneStyle = (z: ZoneKey) => ({
-    fill: activeZone === z ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.07)',
-    stroke: activeZone === z ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.18)',
-    strokeWidth: activeZone === z ? 1.5 : 0.8,
-    cursor: 'pointer',
-    transition: 'all 0.2s',
-  })
 
-  return (
-    <svg viewBox="0 0 120 280" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-full h-full">
-      {/* Head */}
-      <ellipse cx="60" cy="22" rx="14" ry="17" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.18)" strokeWidth="0.8" />
-
-      {/* Neck */}
-      <rect x="55" y="37" width="10" height="9" rx="2" fill="rgba(255,255,255,0.06)" />
-
-      {/* Shoulders / Top zone */}
-      <path
-        d="M20 58 Q60 42 100 58 L98 105 Q60 112 22 105 Z"
-        style={zoneStyle('top')}
-        onClick={() => onZoneClick('top')}
-      />
-      {/* Arms */}
-      <path d="M20 60 L8 100 Q10 108 18 106 L26 68 Z" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.1)" strokeWidth="0.8" />
-      <path d="M100 60 L112 100 Q110 108 102 106 L94 68 Z" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.1)" strokeWidth="0.8" />
-
-      {/* Outerwear overlay zone (slightly wider, dashed) */}
-      <path
-        d="M14 56 Q60 39 106 56 L104 108 Q60 116 16 108 Z"
-        fill="none"
-        stroke={activeZone === 'outerwear' ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.1)'}
-        strokeWidth={activeZone === 'outerwear' ? 1.5 : 0.8}
-        strokeDasharray="3 2"
-        cursor="pointer"
-        onClick={() => onZoneClick('outerwear')}
-        style={{ transition: 'all 0.2s' }}
-      />
-
-      {/* Bottom zone */}
-      <path
-        d="M22 105 Q60 112 98 105 L96 175 Q60 182 24 175 Z"
-        style={zoneStyle('bottom')}
-        onClick={() => onZoneClick('bottom')}
-      />
-
-      {/* Left leg */}
-      <path
-        d="M24 175 L18 245 Q28 252 38 248 L44 178 Z"
-        style={zoneStyle('shoes')}
-        onClick={() => onZoneClick('shoes')}
-      />
-      {/* Right leg */}
-      <path
-        d="M96 175 L102 245 Q92 252 82 248 L76 178 Z"
-        style={zoneStyle('shoes')}
-        onClick={() => onZoneClick('shoes')}
-      />
-
-      {/* Left shoe */}
-      <path
-        d="M18 244 Q12 252 10 258 L40 258 Q44 252 38 246 Z"
-        style={zoneStyle('shoes')}
-        onClick={() => onZoneClick('shoes')}
-      />
-      {/* Right shoe */}
-      <path
-        d="M102 244 Q108 252 110 258 L80 258 Q76 252 82 246 Z"
-        style={zoneStyle('shoes')}
-        onClick={() => onZoneClick('shoes')}
-      />
-
-      {/* Accessories zone — collarbone area */}
-      <ellipse
-        cx="60" cy="52"
-        rx="16" ry="6"
-        style={zoneStyle('accessories')}
-        onClick={() => onZoneClick('accessories')}
-      />
-
-      {/* Zone labels */}
-      <text x="60" y="80" textAnchor="middle" fill="rgba(255,255,255,0.25)" fontSize="5" fontFamily="sans-serif">TOP</text>
-      <text x="60" y="145" textAnchor="middle" fill="rgba(255,255,255,0.25)" fontSize="5" fontFamily="sans-serif">BOTTOM</text>
-      <text x="28" y="220" textAnchor="middle" fill="rgba(255,255,255,0.2)" fontSize="4" fontFamily="sans-serif">SHOES</text>
-      <text x="92" y="220" textAnchor="middle" fill="rgba(255,255,255,0.2)" fontSize="4" fontFamily="sans-serif">SHOES</text>
-      <text x="60" y="53" textAnchor="middle" fill="rgba(255,255,255,0.2)" fontSize="3.5" fontFamily="sans-serif">ACC</text>
-    </svg>
-  )
-}
 
 function ZoneInput({
   zone,
@@ -405,8 +314,13 @@ function ZoneInput({
   )
 }
 
-export default function OutfitBuilder() {
+function OutfitBuilderContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const preselectParam = searchParams?.get('preselect')
+  const preselectIds = preselectParam
+    ? preselectParam.split(',').map((s) => Number(s.trim())).filter((n) => Number.isInteger(n) && n > 0)
+    : []
   const { isAr } = useLocale()
   const copy = isAr ? builderCopy.ar : builderCopy.en
   const { user } = useRequireUser('/login')
@@ -424,6 +338,11 @@ export default function OutfitBuilder() {
     height_category?: string
   }>({})
   const [isLoading, setIsLoading] = useState(false)
+  const [mixLoading, setMixLoading] = useState(false)
+  const [compatScore, setCompatScore] = useState<{ score: number; verdict: string; suggestion: string | null } | null>(null)
+  const [compatLoading, setCompatLoading] = useState(false)
+  const [tryOnResult, setTryOnResult] = useState<string | null>(null)
+  const [tryOnLoading, setTryOnLoading] = useState(false)
   const [zones, setZones] = useState<Record<ZoneKey, ZoneItem>>({
     top:         EMPTY_ZONE(),
     outerwear:   EMPTY_ZONE(),
@@ -431,6 +350,51 @@ export default function OutfitBuilder() {
     shoes:       EMPTY_ZONE(),
     accessories: EMPTY_ZONE(),
   })
+
+  useEffect(() => {
+    if (!user || preselectIds.length === 0) return
+
+    const loadPreselectedItems = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('closet_items')
+          .select('*')
+          .in('id', preselectIds)
+
+        if (error || !data) return
+
+        const updates: Partial<Record<ZoneKey, ZoneItem>> = {}
+        for (const item of data) {
+          let zoneKey: ZoneKey | null = null
+          if (item.category === 'tops') zoneKey = 'top'
+          else if (item.category === 'bottoms') zoneKey = 'bottom'
+          else if (item.category === 'shoes') zoneKey = 'shoes'
+          else if (item.category === 'outerwear') zoneKey = 'outerwear'
+          else if (item.category === 'accessories') zoneKey = 'accessories'
+
+          if (zoneKey && !updates[zoneKey]) {
+            updates[zoneKey] = {
+              label: item.item_name || 'Selected Piece',
+              preview: item.image_url || null,
+              file: null,
+              prompt: `From My Closet: ${item.item_name || ''}`,
+              inputMode: null,
+              inputDraft: '',
+            }
+          }
+        }
+
+        if (Object.keys(updates).length > 0) {
+          setZones((prev) => ({ ...prev, ...updates }))
+        }
+      } catch (err) {
+        console.error('Failed to preselect items:', err)
+      }
+    }
+
+    loadPreselectedItems()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, preselectParam])
 
   useEffect(() => {
     if (!user) return
@@ -550,6 +514,87 @@ export default function OutfitBuilder() {
     }
   }
 
+  const handleMixAndMatch = async () => {
+    if (!user) {
+      setMatchError(isAr ? 'يجب تسجيل الدخول أولاً.' : 'You must sign in first.')
+      return
+    }
+
+    setMixLoading(true)
+    setMatchError(null)
+
+    try {
+      const { data: closetItems, error: closetError } = await supabase
+        .from('closet_items')
+        .select('*')
+        .eq('user_id', user.id)
+
+      if (closetError) throw new Error(closetError.message)
+      if (!closetItems || closetItems.length === 0) {
+        setMatchError(
+          isAr
+            ? 'خزانتك فارغة! يرجى رفع بعض الصور لملابسك في صفحة الخزانة أولاً.'
+            : 'Your closet is empty! Please upload some clothing photos in your Closet tab first.'
+        )
+        return
+      }
+
+      const response = await fetch('/api/outfit-mix-match', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          selected_pieces: zones,
+          closet_items: closetItems,
+          user_profile: {
+            gender: userProfile.gender,
+            skin_tone: userSkinTone,
+            body_shape: userProfile.body_shape,
+            style_preference: userProfile.gender
+          },
+          language: isAr ? 'ar' : 'en'
+        })
+      })
+
+      const data = await response.json()
+      if (data.error) throw new Error(data.error)
+
+      if (data.matches && data.matches.length > 0) {
+        data.matches.forEach((match: any) => {
+          const zoneKey = match.zone.toLowerCase() as ZoneKey
+          if (ZONES.some(z => z.key === zoneKey)) {
+            patch(zoneKey, {
+              preview: match.image_url || null,
+              prompt: match.reason || match.item_name,
+              label: match.item_name,
+              inputMode: null,
+              inputDraft: '',
+              file: null
+            })
+          }
+        })
+
+        setMessages(prev => [
+          ...prev,
+          {
+            role: 'assistant',
+            content: data.ai_verdict || (isAr ? 'لقد قمت بتنسيق خزانتك بذكاء!' : 'Intelligently completed your outfit with items from your Closet!')
+          }
+        ])
+      } else {
+        setMatchError(
+          isAr
+            ? 'لم أجد قطعاً إضافية متناسقة في خزانتك حالياً.'
+            : 'AI Stylist couldn\'t find additional highly matching items in your Closet.'
+        )
+      }
+    } catch (err: any) {
+      console.error('Mix Match Action Error:', err)
+      setMatchError(err.message || copy.failed)
+    } finally {
+      setMixLoading(false)
+    }
+  }
+
   const handleTestOutfit = async () => {
     const imageEntries = getAttachedImageEntries(zones)
 
@@ -600,6 +645,59 @@ export default function OutfitBuilder() {
     }
   }
 
+  const handleCompatibilityCheck = async () => {
+    const imageEntries = getAttachedImageEntries(zones)
+    if (imageEntries.length < 2) return
+    setCompatLoading(true)
+    setCompatScore(null)
+    try {
+      const res = await fetch('/api/outfit-compatibility', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image_urls: imageEntries.map((e) => e.imageUrl),
+          item_names: imageEntries.map((e) => e.label),
+          occasion: 'casual',
+          language: isAr ? 'ar' : 'en',
+        }),
+      })
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
+      setCompatScore({ score: data.score, verdict: data.verdict, suggestion: data.suggestion ?? null })
+    } catch {
+      // silent fail — main analysis covers this
+    } finally {
+      setCompatLoading(false)
+    }
+  }
+
+  const handleTryOn = async () => {
+    const imageEntries = getAttachedImageEntries(zones)
+    const personEntry = imageEntries[0]
+    const garmentEntry = imageEntries[1]
+    if (!personEntry || !garmentEntry) return
+    setTryOnLoading(true)
+    setTryOnResult(null)
+    try {
+      const res = await fetch('/api/outfit-tryon', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          person_url: personEntry.imageUrl,
+          garment_url: garmentEntry.imageUrl,
+          garment_description: garmentEntry.label,
+        }),
+      })
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
+      setTryOnResult(data.image_url)
+    } catch (err) {
+      setMatchError(err instanceof Error ? err.message : isAr ? 'تعذّر تجربة الملابس.' : 'Try-on failed.')
+    } finally {
+      setTryOnLoading(false)
+    }
+  }
+
   const filledCount = Object.values(zones).filter((z) => z.preview || z.prompt).length
   const attachedImageCount = getAttachedImageEntries(zones).length
   const hasAnalyzablePhotos = attachedImageCount > 0
@@ -639,28 +737,229 @@ export default function OutfitBuilder() {
       </div>
 
       <div className="relative z-10 px-4 pb-24 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-center">
-        {/* Mannequin */}
+        {/* Interactive Outfit Flat-Lay Canvas */}
         <div className="flex flex-col items-center">
-          <div className="relative w-48 h-72 mx-auto">
-            <MannequinSVG
-              activeZone={activeZone}
-              onZoneClick={(z) => setActiveZone((prev) => prev === z ? null : z)}
-            />
-            {/* Overlay previews on mannequin */}
-            {zones.top.preview && (
-              <div className="absolute top-[22%] left-[18%] w-[64%] h-[30%] rounded-lg overflow-hidden opacity-60 pointer-events-none">
-                <img src={zones.top.preview} alt="top" className="w-full h-full object-cover" />
+          <div className="relative w-80 min-h-[460px] bg-zinc-950/40 border border-zinc-900 rounded-[2.5rem] p-6 backdrop-blur-xl flex flex-col justify-between shadow-2xl">
+            {/* Flat-Lay Title / Header */}
+            <div className="flex items-center justify-between border-b border-zinc-900 pb-4 mb-4">
+              <span className="text-[10px] uppercase tracking-[0.25em] font-bold text-zinc-500">
+                {isAr ? 'لوحة التنسيق المسطحة' : 'Flat-Lay Canvas'}
+              </span>
+              <span className="text-[10px] text-zinc-700 font-medium">Elephante AI</span>
+            </div>
+
+            {/* Grid of Slots */}
+            <div className="flex-1 flex flex-col gap-4">
+              {/* Accessories Slot (Top Bar) */}
+              <div 
+                onClick={() => setActiveZone('accessories')}
+                className={`group relative overflow-hidden rounded-2xl border transition-all duration-300 cursor-pointer flex items-center justify-between p-3.5 ${
+                  activeZone === 'accessories' 
+                    ? 'border-white/30 bg-white/10' 
+                    : zones.accessories.preview || zones.accessories.prompt 
+                      ? 'border-zinc-800 bg-zinc-900/60' 
+                      : 'border-zinc-900 border-dashed bg-zinc-950/30 hover:border-zinc-800'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-xl">💍</span>
+                  <div>
+                    <p className="text-[10px] font-bold text-white uppercase tracking-wider">
+                      {isAr ? ZONE_AR.accessories.label : 'Accessories'}
+                    </p>
+                    <p className="text-[10px] text-zinc-500 truncate max-w-[180px]">
+                      {zones.accessories.preview 
+                        ? (isAr ? 'صورة منتج مرفقة' : 'Product Image Attached') 
+                        : zones.accessories.prompt 
+                          ? zones.accessories.prompt 
+                          : (isAr ? ZONE_AR.accessories.hint : 'Watch, bag, hat…')}
+                    </p>
+                  </div>
+                </div>
+                {zones.accessories.preview ? (
+                  <img src={zones.accessories.preview} className="w-10 h-10 rounded-xl object-cover border border-white/10" alt="" />
+                ) : zones.accessories.prompt ? (
+                  <div className="px-2.5 py-1.5 rounded-lg bg-white/10 text-white text-[9px] font-bold uppercase tracking-wider">
+                    {isAr ? 'نص' : 'Text'}
+                  </div>
+                ) : (
+                  <span className="text-[10px] text-zinc-600 font-bold group-hover:text-zinc-400 transition-colors uppercase tracking-widest">
+                    {isAr ? '+ إضافة' : '+ Add'}
+                  </span>
+                )}
               </div>
-            )}
-            {zones.bottom.preview && (
-              <div className="absolute top-[52%] left-[20%] w-[60%] h-[28%] rounded-lg overflow-hidden opacity-60 pointer-events-none">
-                <img src={zones.bottom.preview} alt="bottom" className="w-full h-full object-cover" />
+
+              {/* Outerwear & Top side-by-side */}
+              <div className="grid grid-cols-2 gap-4">
+                {/* Outerwear */}
+                <div 
+                  onClick={() => setActiveZone('outerwear')}
+                  className={`group relative overflow-hidden rounded-2xl border transition-all duration-300 cursor-pointer flex flex-col justify-between p-3.5 h-[130px] ${
+                    activeZone === 'outerwear' 
+                      ? 'border-white/30 bg-white/10' 
+                      : zones.outerwear.preview || zones.outerwear.prompt 
+                        ? 'border-zinc-800 bg-zinc-900/60' 
+                        : 'border-zinc-900 border-dashed bg-zinc-950/30 hover:border-zinc-800'
+                  }`}
+                >
+                  <div className="flex justify-between items-start">
+                    <span className="text-xl">🧥</span>
+                    <span className="text-[8px] font-bold text-zinc-500 uppercase tracking-widest">
+                      {isAr ? ZONE_AR.outerwear.label : 'Outerwear'}
+                    </span>
+                  </div>
+                  {zones.outerwear.preview ? (
+                    <img src={zones.outerwear.preview} className="w-full h-16 rounded-xl object-cover border border-white/10" alt="" />
+                  ) : zones.outerwear.prompt ? (
+                    <p className="text-[10px] text-zinc-300 font-medium italic truncate max-w-[120px]">
+                      "{zones.outerwear.prompt}"
+                    </p>
+                  ) : (
+                    <p className="text-[9px] text-zinc-600 italic">
+                      {isAr ? ZONE_AR.outerwear.hint : 'Jacket, coat, blazer…'}
+                    </p>
+                  )}
+                  {!zones.outerwear.preview && !zones.outerwear.prompt && (
+                    <span className="text-[9px] text-zinc-600 font-bold group-hover:text-zinc-400 transition-colors uppercase tracking-widest mt-auto">
+                      {isAr ? '+ إضافة' : '+ Add'}
+                    </span>
+                  )}
+                </div>
+
+                {/* Top */}
+                <div 
+                  onClick={() => setActiveZone('top')}
+                  className={`group relative overflow-hidden rounded-2xl border transition-all duration-300 cursor-pointer flex flex-col justify-between p-3.5 h-[130px] ${
+                    activeZone === 'top' 
+                      ? 'border-white/30 bg-white/10' 
+                      : zones.top.preview || zones.top.prompt 
+                        ? 'border-zinc-800 bg-zinc-900/60' 
+                        : 'border-zinc-900 border-dashed bg-zinc-950/30 hover:border-zinc-800'
+                  }`}
+                >
+                  <div className="flex justify-between items-start">
+                    <span className="text-xl">👕</span>
+                    <span className="text-[8px] font-bold text-zinc-500 uppercase tracking-widest">
+                      {isAr ? ZONE_AR.top.label : 'Top'}
+                    </span>
+                  </div>
+                  {zones.top.preview ? (
+                    <img src={zones.top.preview} className="w-full h-16 rounded-xl object-cover border border-white/10" alt="" />
+                  ) : zones.top.prompt ? (
+                    <p className="text-[10px] text-zinc-300 font-medium italic truncate max-w-[120px]">
+                      "{zones.top.prompt}"
+                    </p>
+                  ) : (
+                    <p className="text-[9px] text-zinc-600 italic">
+                      {isAr ? ZONE_AR.top.hint : 'Shirt, tee, blouse…'}
+                    </p>
+                  )}
+                  {!zones.top.preview && !zones.top.prompt && (
+                    <span className="text-[9px] text-zinc-600 font-bold group-hover:text-zinc-400 transition-colors uppercase tracking-widest mt-auto">
+                      {isAr ? '+ إضافة' : '+ Add'}
+                    </span>
+                  )}
+                </div>
               </div>
-            )}
+
+              {/* Bottom */}
+              <div 
+                onClick={() => setActiveZone('bottom')}
+                className={`group relative overflow-hidden rounded-2xl border transition-all duration-300 cursor-pointer flex items-center justify-between p-3.5 ${
+                  activeZone === 'bottom' 
+                    ? 'border-white/30 bg-white/10' 
+                    : zones.bottom.preview || zones.bottom.prompt 
+                      ? 'border-zinc-800 bg-zinc-900/60' 
+                      : 'border-zinc-900 border-dashed bg-zinc-950/30 hover:border-zinc-800'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-xl">👖</span>
+                  <div>
+                    <p className="text-[10px] font-bold text-white uppercase tracking-wider">
+                      {isAr ? ZONE_AR.bottom.label : 'Bottom'}
+                    </p>
+                    <p className="text-[10px] text-zinc-500 truncate max-w-[180px]">
+                      {zones.bottom.preview 
+                        ? (isAr ? 'صورة منتج مرفقة' : 'Product Image Attached') 
+                        : zones.bottom.prompt 
+                          ? zones.bottom.prompt 
+                          : (isAr ? ZONE_AR.bottom.hint : 'Pants, skirt, shorts…')}
+                    </p>
+                  </div>
+                </div>
+                {zones.bottom.preview ? (
+                  <img src={zones.bottom.preview} className="w-10 h-10 rounded-xl object-cover border border-white/10" alt="" />
+                ) : zones.bottom.prompt ? (
+                  <div className="px-2.5 py-1.5 rounded-lg bg-white/10 text-white text-[9px] font-bold uppercase tracking-wider">
+                    {isAr ? 'نص' : 'Text'}
+                  </div>
+                ) : (
+                  <span className="text-[10px] text-zinc-600 font-bold group-hover:text-zinc-400 transition-colors uppercase tracking-widest">
+                    {isAr ? '+ إضافة' : '+ Add'}
+                  </span>
+                )}
+              </div>
+
+              {/* Shoes */}
+              <div 
+                onClick={() => setActiveZone('shoes')}
+                className={`group relative overflow-hidden rounded-2xl border transition-all duration-300 cursor-pointer flex items-center justify-between p-3.5 ${
+                  activeZone === 'shoes' 
+                    ? 'border-white/30 bg-white/10' 
+                    : zones.shoes.preview || zones.shoes.prompt 
+                      ? 'border-zinc-800 bg-zinc-900/60' 
+                      : 'border-zinc-900 border-dashed bg-zinc-950/30 hover:border-zinc-800'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-xl">👟</span>
+                  <div>
+                    <p className="text-[10px] font-bold text-white uppercase tracking-wider">
+                      {isAr ? ZONE_AR.shoes.label : 'Shoes'}
+                    </p>
+                    <p className="text-[10px] text-zinc-500 truncate max-w-[180px]">
+                      {zones.shoes.preview 
+                        ? (isAr ? 'صورة منتج مرفقة' : 'Product Image Attached') 
+                        : zones.shoes.prompt 
+                          ? zones.shoes.prompt 
+                          : (isAr ? ZONE_AR.shoes.hint : 'Sneakers, boots, heels…')}
+                    </p>
+                  </div>
+                </div>
+                {zones.shoes.preview ? (
+                  <img src={zones.shoes.preview} className="w-10 h-10 rounded-xl object-cover border border-white/10" alt="" />
+                ) : zones.shoes.prompt ? (
+                  <div className="px-2.5 py-1.5 rounded-lg bg-white/10 text-white text-[9px] font-bold uppercase tracking-wider">
+                    {isAr ? 'نص' : 'Text'}
+                  </div>
+                ) : (
+                  <span className="text-[10px] text-zinc-600 font-bold group-hover:text-zinc-400 transition-colors uppercase tracking-widest">
+                    {isAr ? '+ إضافة' : '+ Add'}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Mix & Match Button */}
+            <div className="mt-6 border-t border-zinc-900 pt-4">
+              <button
+                type="button"
+                onClick={handleMixAndMatch}
+                disabled={mixLoading}
+                className="w-full h-11 bg-white hover:bg-zinc-100 text-black rounded-xl text-[10px] font-extrabold uppercase tracking-widest flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none"
+              >
+                {mixLoading ? (
+                  <span className="w-3.5 h-3.5 border-2 border-zinc-700 border-t-zinc-900 rounded-full animate-spin" />
+                ) : (
+                  <span>✨</span>
+                )}
+                {mixLoading 
+                  ? (isAr ? 'جاري التنسيق...' : 'Matching items...') 
+                  : (isAr ? 'تنسيق ذكي بالذكاء الاصطناعي' : 'AI Mix & Match')}
+              </button>
+            </div>
           </div>
-          <p className="text-[10px] uppercase tracking-widest text-zinc-700 mt-3 text-center">
-            {copy.tapZone}
-          </p>
         </div>
 
         {/* Zone inputs */}
@@ -688,13 +987,55 @@ export default function OutfitBuilder() {
           ))}
 
           {filledCount > 0 && (
-            <button
-              onClick={handleTestOutfit}
-              disabled={isLoading || !hasAnalyzablePhotos}
-              className="w-full mt-2 py-4 bg-white text-black font-bold text-[10px] uppercase tracking-widest rounded-2xl hover:bg-zinc-100 transition-colors active:scale-[0.98] min-h-[52px] disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {isLoading ? copy.consulting : hasAnalyzablePhotos ? copy.rate : copy.uploadPhotoToRate}
-            </button>
+            <div className="flex flex-col gap-2 mt-2">
+              <button
+                onClick={handleTestOutfit}
+                disabled={isLoading || !hasAnalyzablePhotos}
+                className="w-full py-4 bg-white text-black font-bold text-[10px] uppercase tracking-widest rounded-2xl hover:bg-zinc-100 transition-colors active:scale-[0.98] min-h-[52px] disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {isLoading ? copy.consulting : hasAnalyzablePhotos ? copy.rate : copy.uploadPhotoToRate}
+              </button>
+
+              {attachedImageCount >= 2 && (
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleCompatibilityCheck}
+                    disabled={compatLoading}
+                    className="flex-1 py-3 border border-zinc-800 text-white font-bold text-[9px] uppercase tracking-widest rounded-xl hover:border-zinc-600 hover:bg-zinc-900/60 transition-all active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none flex items-center justify-center gap-1.5"
+                  >
+                    {compatLoading ? (
+                      <span className="w-3 h-3 border border-zinc-500 border-t-white rounded-full animate-spin" />
+                    ) : '◈'}
+                    {isAr ? 'توافق CLIP' : 'CLIP Compat'}
+                  </button>
+                  <button
+                    onClick={handleTryOn}
+                    disabled={tryOnLoading}
+                    className="flex-1 py-3 border border-zinc-800 text-white font-bold text-[9px] uppercase tracking-widest rounded-xl hover:border-zinc-600 hover:bg-zinc-900/60 transition-all active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none flex items-center justify-center gap-1.5"
+                  >
+                    {tryOnLoading ? (
+                      <span className="w-3 h-3 border border-zinc-500 border-t-white rounded-full animate-spin" />
+                    ) : '👗'}
+                    {isAr ? 'تجربة افتراضية' : 'Try On'}
+                  </button>
+                </div>
+              )}
+
+              {compatScore && (
+                <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-zinc-800 bg-zinc-950/60">
+                  <span className={`text-sm font-bold tabular-nums ${compatScore.score >= 70 ? 'text-white' : compatScore.score >= 45 ? 'text-zinc-300' : 'text-zinc-500'}`}>
+                    {compatScore.score}
+                  </span>
+                  <div className="flex-1">
+                    <p className="text-[10px] font-bold text-zinc-300">{compatScore.verdict}</p>
+                    {compatScore.suggestion && (
+                      <p className="text-[9px] text-zinc-500 mt-0.5 leading-relaxed">{compatScore.suggestion}</p>
+                    )}
+                  </div>
+                  <span className="text-[8px] uppercase tracking-widest text-zinc-600">CLIP</span>
+                </div>
+              )}
+            </div>
           )}
 
           {analysis && (
@@ -823,6 +1164,15 @@ export default function OutfitBuilder() {
             </div>
           )}
 
+          {tryOnResult && (
+            <div className="mt-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <p className="text-[9px] uppercase tracking-[0.3em] text-zinc-500 mb-3">{isAr ? 'نتيجة التجربة' : 'Try-On Result'}</p>
+              <div className="rounded-[2rem] overflow-hidden border border-zinc-800 bg-zinc-950">
+                <img src={tryOnResult} alt="Try-on result" className="w-full object-cover" />
+              </div>
+            </div>
+          )}
+
           {matchError && (
             <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 px-4 py-3">
               <p className="text-xs text-red-300">{matchError}</p>
@@ -831,5 +1181,17 @@ export default function OutfitBuilder() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function OutfitBuilder() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-black text-white flex items-center justify-center">
+        <span className="h-6 w-6 rounded-full border-2 border-white/20 border-t-white animate-spin" />
+      </div>
+    }>
+      <OutfitBuilderContent />
+    </Suspense>
   )
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthClients } from '@/app/api/auth/_utils'
 import { rateLimit } from '@/lib/rateLimit'
+import { prettifyWardrobeImage } from '@/lib/wardrobeImage'
 import { analyzeImageWithFallback, extractJSON } from '@/services/aiProviders'
 import type { GeneratedOutfitVariant } from '@/types/outfit'
 
@@ -24,6 +25,10 @@ Return ONLY a raw JSON object, no markdown and no code fences:
   "material_top": "top fabric if inferable, otherwise null",
   "material_bottom": "bottom fabric if inferable, otherwise null",
   "material_shoes": "shoe material if inferable, otherwise null",
+  "pattern_notes": "visible patterns or prints across the clothing, otherwise null",
+  "season": "best season or year-round suitability",
+  "formality": "one of: casual | smart casual | business casual | formal | black tie",
+  "brand_visible": "brand name only if clearly visible, otherwise null",
   "outfit_details": "2 sentences explaining what was extracted from the photo",
   "skin_tone_analysis": "1 sentence about the palette if skin is visible or profile is provided",
   "pro_tip": "one optional styling tip that preserves the original outfit",
@@ -47,6 +52,11 @@ type RequestBody = {
   language?: 'en' | 'ar'
 }
 
+type ImageUpload = {
+  buffer: Buffer
+  contentType: string
+}
+
 function asString(value: unknown, fallback = '') {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback
 }
@@ -67,6 +77,58 @@ function asHexArray(value: unknown) {
     .filter((item) => /^#[0-9a-f]{6}$/i.test(item))
     .slice(0, 6)
   return colors.length ? colors : null
+}
+
+function extensionForContentType(contentType: string) {
+  const lower = contentType.toLowerCase()
+  if (lower.includes('jpeg') || lower.includes('jpg')) return 'jpg'
+  if (lower.includes('webp')) return 'webp'
+  if (lower.includes('heic')) return 'heic'
+  if (lower.includes('heif')) return 'heif'
+  return 'png'
+}
+
+async function imageUrlToUpload(imageUrl: string): Promise<ImageUpload> {
+  const dataMatch = imageUrl.match(/^data:([^;]+);base64,([\s\S]+)$/)
+  if (dataMatch?.[2]) {
+    return {
+      buffer: Buffer.from(dataMatch[2].replace(/\s/g, ''), 'base64'),
+      contentType: dataMatch[1] || 'image/png',
+    }
+  }
+
+  if (!/^https?:\/\//i.test(imageUrl)) {
+    throw new Error('Uploaded image URL is not valid.')
+  }
+
+  const response = await fetch(imageUrl, { signal: AbortSignal.timeout(45_000) })
+  if (!response.ok) throw new Error(`Could not download uploaded image (${response.status}).`)
+
+  const contentType = response.headers.get('content-type') || 'image/png'
+  if (!contentType.toLowerCase().startsWith('image/')) throw new Error('Uploaded URL did not return an image.')
+
+  return {
+    buffer: Buffer.from(await response.arrayBuffer()),
+    contentType,
+  }
+}
+
+async function uploadClosetImportImage(
+  supabase: ReturnType<typeof getAuthClients>['serviceClient'],
+  userId: string,
+  buffer: Buffer,
+  contentType: string,
+  filename: string,
+) {
+  const path = `${userId}/closet-import/${filename}`
+  const { error } = await supabase.storage
+    .from('wardrobe')
+    .upload(path, buffer, { contentType, upsert: false })
+
+  if (error) throw new Error(`Closet image upload failed: ${error.message}`)
+
+  const { data: { publicUrl } } = supabase.storage.from('wardrobe').getPublicUrl(path)
+  return publicUrl
 }
 
 function normalizeOutfit(parsed: Record<string, unknown>, gender: string | null | undefined, fallbackText: string): GeneratedOutfitVariant {
@@ -185,7 +247,20 @@ export async function POST(req: NextRequest) {
       userProfile ? `User profile context:\n${userProfile}` : null,
     ].filter(Boolean).join('\n\n')
 
-    const result = await analyzeImageWithFallback(imageUrl, prompt)
+    const sourceUpload = await imageUrlToUpload(imageUrl)
+    const { serviceClient } = getAuthClients('closet outfit photo import')
+    const timestamp = Date.now()
+    const originalExt = extensionForContentType(sourceUpload.contentType)
+    const originalPublicUrl = await uploadClosetImportImage(
+      serviceClient,
+      userId,
+      sourceUpload.buffer,
+      sourceUpload.contentType,
+      `original/${timestamp}.${originalExt}`,
+    )
+
+    // Analyze the original image first so we know what pieces to isolate
+    const result = await analyzeImageWithFallback([originalPublicUrl], prompt)
     const parsed = extractJSON(result.content) as Record<string, unknown>
     const outfit = normalizeOutfit(parsed, body.gender, result.content)
 
@@ -196,80 +271,91 @@ export async function POST(req: NextRequest) {
     const outerwear = outfit.outerwear
     const accessories = outfit.accessories
 
-    const itemsToSave: Array<{
+    type PieceSpec = {
       category: 'tops' | 'bottoms' | 'shoes' | 'outerwear' | 'accessories'
       item_name: string
       item_type: string
       color: string
+      material: string
       occasion: string
       style_query: string
-    }> = []
-
-    if (top) {
-      itemsToSave.push({
-        category: 'tops',
-        item_name: top,
-        item_type: 'top',
-        color: asString(parsed.color_scheme, 'Unknown'),
-        occasion: asString(parsed.occasions, 'Daily Wear'),
-        style_query: `style this ${top}`,
-      })
-    }
-    if (bottom) {
-      itemsToSave.push({
-        category: 'bottoms',
-        item_name: bottom,
-        item_type: 'bottom',
-        color: asString(parsed.color_scheme, 'Unknown'),
-        occasion: asString(parsed.occasions, 'Daily Wear'),
-        style_query: `style this ${bottom}`,
-      })
-    }
-    if (shoes) {
-      itemsToSave.push({
-        category: 'shoes',
-        item_name: shoes,
-        item_type: 'shoes',
-        color: asString(parsed.color_scheme, 'Unknown'),
-        occasion: asString(parsed.occasions, 'Daily Wear'),
-        style_query: `style this ${shoes}`,
-      })
-    }
-    if (outerwear) {
-      itemsToSave.push({
-        category: 'outerwear',
-        item_name: outerwear,
-        item_type: 'outerwear',
-        color: asString(parsed.color_scheme, 'Unknown'),
-        occasion: asString(parsed.occasions, 'Daily Wear'),
-        style_query: `style this ${outerwear}`,
-      })
-    }
-    if (accessories) {
-      itemsToSave.push({
-        category: 'accessories',
-        item_name: accessories,
-        item_type: 'accessories',
-        color: asString(parsed.color_scheme, 'Unknown'),
-        occasion: asString(parsed.occasions, 'Daily Wear'),
-        style_query: `style this ${accessories}`,
-      })
+      subjectHint: string
     }
 
-    const { serviceClient } = getAuthClients('closet outfit photo import')
+    const pieceSpecs: PieceSpec[] = []
+    if (top) pieceSpecs.push({
+      category: 'tops', item_name: top, item_type: 'top',
+      color: asString(parsed.color_scheme, 'Unknown'), material: asString(parsed.material_top),
+      occasion: asString(parsed.occasions, 'Daily Wear'), style_query: `style this ${top}`,
+      subjectHint: `only the top garment: ${top}. Exclude all other pieces, hangers, body, and background.`,
+    })
+    if (bottom) pieceSpecs.push({
+      category: 'bottoms', item_name: bottom, item_type: 'bottom',
+      color: asString(parsed.color_scheme, 'Unknown'), material: asString(parsed.material_bottom),
+      occasion: asString(parsed.occasions, 'Daily Wear'), style_query: `style this ${bottom}`,
+      subjectHint: `only the bottom garment: ${bottom}. Exclude all other pieces, hangers, body, and background.`,
+    })
+    if (shoes) pieceSpecs.push({
+      category: 'shoes', item_name: shoes, item_type: 'shoes',
+      color: asString(parsed.color_scheme, 'Unknown'), material: asString(parsed.material_shoes),
+      occasion: asString(parsed.occasions, 'Daily Wear'), style_query: `style this ${shoes}`,
+      subjectHint: `only the shoes: ${shoes}. Exclude all clothing, hangers, body, and background.`,
+    })
+    if (outerwear) pieceSpecs.push({
+      category: 'outerwear', item_name: outerwear, item_type: 'outerwear',
+      color: asString(parsed.color_scheme, 'Unknown'), material: asString(parsed.material_top),
+      occasion: asString(parsed.occasions, 'Daily Wear'), style_query: `style this ${outerwear}`,
+      subjectHint: `only the outerwear: ${outerwear}. Exclude all other pieces, hangers, body, and background.`,
+    })
+    if (accessories) pieceSpecs.push({
+      category: 'accessories', item_name: accessories, item_type: 'accessories',
+      color: asString(parsed.color_scheme, 'Unknown'), material: '',
+      occasion: asString(parsed.occasions, 'Daily Wear'), style_query: `style this ${accessories}`,
+      subjectHint: `only the accessory: ${accessories}. Exclude all clothing, hangers, body, and background.`,
+    })
+
+    // Prettify each piece individually in parallel — gives each piece its own isolated image
+    const prettifyResults = await Promise.allSettled(
+      pieceSpecs.map(async (spec) => {
+        const result = await prettifyWardrobeImage(sourceUpload.buffer, userId, {
+          itemType: spec.item_type,
+          itemName: spec.item_name,
+          subjectHint: spec.subjectHint,
+        })
+        const url = await uploadClosetImportImage(
+          serviceClient, userId, result.buffer, result.contentType,
+          `clean/${timestamp}_${spec.item_type}_${Math.random().toString(36).slice(2, 7)}.${result.extension}`,
+        )
+        return { url, provider: result.provider }
+      })
+    )
+
     const savedItems: any[] = []
 
-    if (itemsToSave.length > 0) {
-      const inserts = itemsToSave.map((item) => ({
-        user_id: userId,
-        category: item.category,
-        item_name: item.item_name,
-        item_type: item.item_type,
-        color: item.color,
-        occasion: item.occasion,
-        style_query: item.style_query,
-        image_url: imageUrl,
-      }))
+    if (pieceSpecs.length > 0) {
+      const inserts = pieceSpecs.map((item, i) => {
+        const prettify = prettifyResults[i]
+        const imageUrl = prettify?.status === 'fulfilled' ? prettify.value.url : originalPublicUrl
+        const imageProvider = prettify?.status === 'fulfilled' ? prettify.value.provider : ''
+        return {
+          user_id: userId,
+          category: item.category,
+          item_name: item.item_name,
+          item_type: item.item_type,
+          color: item.color,
+          material: item.material,
+          pattern: asString(parsed.pattern_notes),
+          season: asString(parsed.season),
+          formality: asString(parsed.formality),
+          brand: asString(parsed.brand_visible),
+          occasion: item.occasion,
+          style_query: item.style_query,
+          image_url: imageUrl,
+          original_image_url: originalPublicUrl,
+          image_prettified: prettify?.status === 'fulfilled',
+          image_provider: imageProvider,
+        }
+      })
 
       const { data, error: insertError } = await safeBulkInsertClosetItems(serviceClient, inserts)
 
@@ -285,6 +371,7 @@ export async function POST(req: NextRequest) {
       status: 'complete',
       imported_items: savedItems,
       source_provider: result.provider,
+      image_provider: result.provider,
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not import outfit photo.'

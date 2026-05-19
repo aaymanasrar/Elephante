@@ -21,7 +21,12 @@ interface AnalysisPayload {
   overall_verdict: string
 }
 
-type AnalysisMode = 'inventory' | 'rating'
+interface FollowUpPayload {
+  answer: string
+  suggested_questions: string[]
+}
+
+type AnalysisMode = 'inventory' | 'rating' | 'question'
 
 const VISION_PROMPT = `You are Elephante's AI Stylist, an expert in high-fashion, color theory, and silhouette engineering. Analyse the attached outfit image(s) and return ONLY a raw JSON object (no markdown, no code blocks) with this exact structure:
 {
@@ -78,6 +83,21 @@ const INVENTORY_PROMPT = `You are Elephante's visual fashion analyst. Identify w
 }
 For pieces: include every visible outfit item as its own string. Name the category plus visible color/material/cut when possible. Include tops, bottoms, shoes, outerwear, bags, hats, belts, watches, jewellery, eyewear, socks, and visible layering. Do not invent hidden items; omit anything that is not visible instead of adding null.
 Do not score or judge the outfit in this mode. Focus on what is there: garments, colors, silhouette, and visible styling details.`
+
+const FOLLOW_UP_PROMPT = `You are Elephante's AI Stylist in an ongoing chat about the attached outfit image(s). Answer the user's follow-up question by looking at the image and using the prior analysis only as supporting context.
+
+Return ONLY a raw JSON object (no markdown, no code blocks) with this exact structure:
+{
+  "answer": "direct conversational answer to the user's question, 2-5 sentences, specific to the visible outfit",
+  "suggested_questions": ["short useful follow-up question", "short useful follow-up question", "short useful follow-up question"]
+}
+
+Rules:
+- Stay grounded in what is visible. Do not invent hidden items, brands, body details, or materials you cannot see.
+- If the user asks for a rating, include a clear score and one reason.
+- If the user asks how to improve the look, give concrete changes by garment, color, fit, or accessory.
+- If the question is ambiguous, answer the most likely fashion interpretation and offer one focused next question.
+- Keep the tone warm, concise, and stylist-like.`
 
 function uniqueStrings(values: unknown[]) {
   return Array.from(new Set(values.filter((value): value is string => typeof value === 'string' && value.trim().length > 0).map((value) => value.trim())))
@@ -145,6 +165,31 @@ function compactModelText(raw: string) {
     .slice(0, 600)
 }
 
+function stringifyForPrompt(value: unknown, maxChars = 2200) {
+  if (!value) return ''
+  try {
+    const text = JSON.stringify(value, null, 2)
+    return text.length > maxChars ? `${text.slice(0, maxChars)}...` : text
+  } catch {
+    return ''
+  }
+}
+
+function normalizeFollowUp(parsed: Record<string, unknown>, fallbackText: string, language: string): FollowUpPayload {
+  const fallback = compactModelText(fallbackText)
+  const answer = asString(
+    parsed.answer,
+    fallback || (language === 'ar'
+      ? 'أستطيع مساعدتك في هذه الصورة. اسألني عن التناسق، الألوان، المقاس، أو كيف نطوّر الإطلالة.'
+      : 'I can help with this photo. Ask me about the outfit balance, colors, fit, or how to improve the look.'),
+  )
+
+  return {
+    answer,
+    suggested_questions: asStringArray(parsed.suggested_questions).slice(0, 3),
+  }
+}
+
 function normalizeAnalysis(parsed: Record<string, unknown>, fallbackText: string, skinTone: string, mode: AnalysisMode): AnalysisPayload {
   const overallFallback = compactModelText(fallbackText) || 'The outfit has been reviewed for color harmony, proportion, and overall cohesion.'
   const limitedSkinTone = skinTone
@@ -184,15 +229,18 @@ export async function POST(req: NextRequest) {
     const skinTone = asString(body.skin_tone)
     const imageLabels = asStringArray(body.image_labels)
     const language = asString(body.language, 'en')
-    const mode: AnalysisMode = asString(body.mode) === 'inventory' ? 'inventory' : 'rating'
+    const requestedMode = asString(body.mode)
+    const mode: AnalysisMode = requestedMode === 'inventory' || requestedMode === 'question' ? requestedMode : 'rating'
+    const question = asString(body.question || body.user_request || body.query)
     const gender = asString(body.gender)
     const skinUndertone = asString(body.skin_undertone)
     const bodyShape = asString(body.body_shape)
     const heightCategory = asString(body.height_category)
 
     if (imageUrls.length === 0) return NextResponse.json({ error: 'At least one outfit image is required.' }, { status: 400 })
+    if (mode === 'question' && !question) return NextResponse.json({ error: 'A follow-up question is required.' }, { status: 400 })
 
-    let prompt = mode === 'inventory' ? INVENTORY_PROMPT : VISION_PROMPT
+    let prompt = mode === 'inventory' ? INVENTORY_PROMPT : mode === 'question' ? FOLLOW_UP_PROMPT : VISION_PROMPT
     
     // Build User Context String
     let contextStr = ''
@@ -213,6 +261,25 @@ export async function POST(req: NextRequest) {
     if (outfitDetails) {
       prompt += `\n\nKnown outfit details from the user interface:\n${outfitDetails}`
     }
+    if (mode === 'question') {
+      const priorAnalysis = stringifyForPrompt(body.prior_analysis)
+      const priorTurns = Array.isArray(body.prior_turns)
+        ? body.prior_turns
+          .slice(-8)
+          .map((turn) => {
+            if (!turn || typeof turn !== 'object') return ''
+            const role = asString((turn as Record<string, unknown>).role, 'user')
+            const content = asString((turn as Record<string, unknown>).content)
+            return content ? `${role}: ${content}` : ''
+          })
+          .filter(Boolean)
+          .join('\n')
+        : ''
+
+      if (priorAnalysis) prompt += `\n\nPrior structured analysis:\n${priorAnalysis}`
+      if (priorTurns) prompt += `\n\nRecent chat turns:\n${priorTurns}`
+      prompt += `\n\nUser follow-up question:\n${question}`
+    }
     if (imageUrls.length > 1) {
       const labels = imageUrls.map((_, index) => imageLabels[index] || `image ${index + 1}`).join(', ')
       prompt += `\n\nMultiple outfit images are provided in this order: ${labels}. Consider them together as one outfit.`
@@ -220,6 +287,11 @@ export async function POST(req: NextRequest) {
 
     const { content } = await analyzeImageWithFallback(imageUrls, prompt)
     const parsed = extractJSON(content) as Record<string, unknown>
+    if (mode === 'question') {
+      const followUp = normalizeFollowUp(parsed, content, language)
+      return NextResponse.json({ ...followUp, mode })
+    }
+
     const analysis = normalizeAnalysis(parsed, content, skinTone, mode)
 
     return NextResponse.json({ analysis, mode })

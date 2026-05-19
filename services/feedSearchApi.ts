@@ -20,6 +20,7 @@ interface OutfitGenerationParams {
   userHeight: string
   userSkinTone: string
   userStylePref: string
+  avatar_url?: string
   language?: 'en' | 'ar'
 }
 
@@ -63,6 +64,7 @@ export async function requestOutfitGeneration({
   userHeight,
   userSkinTone,
   userStylePref,
+  avatar_url,
   language,
 }: OutfitGenerationParams, signal: AbortSignal) {
   const response = await fetch('/api/outfit-generate', {
@@ -76,6 +78,7 @@ export async function requestOutfitGeneration({
       body_shape: userBodyShape,
       height: userHeight,
       style_pref: userStylePref,
+      avatar_url,
       language,
     }),
   })

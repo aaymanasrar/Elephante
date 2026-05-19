@@ -1,13 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import OpenAI from 'openai'
 import { chatWithFallback, extractJSON } from '@/services/aiProviders'
 import { rateLimit } from '@/lib/rateLimit'
-import { generateEdenAIImage, hasEdenAIImageConfig } from '@/lib/edenaiImage'
-import { generateMagnificMysticImage, hasMagnificImageConfig } from '@/lib/magnificImage'
-import { buildCatalogMannequinImagePrompt } from '@/lib/outfitImagePrompt'
-import { generateSkyworkImage, hasSkyworkImageConfig } from '@/lib/skyworkImage'
-import { generateFalImage, hasFalImageConfig } from '@/lib/falImage'
-import { getOpenAIKeys } from '@/lib/openaiKeys'
+import { generateMannequinOutfitImage, seedFromString } from '@/lib/mannequinImage'
 
 export const maxDuration = 300
 
@@ -64,6 +58,12 @@ If skin_tone_match is false, replace "alternative": null with:
   "skin_tone_reason": "1 sentence: why this palette works for the skin tone"
 }
 
+Gulf/GCC context rules (apply when occasion or query mentions Eid, Ramadan, National Day, Majlis, thobe, bisht, or destination is Gulf):
+- For men: Thobe + Bisht for Eid/formal; Thobe alone for Friday Prayer/Majlis; Western formal with kandura accessories for business
+- For women: Abaya + modest inner layer; coordinate shayla colour with occasion tone
+- Luxury accessories: Patek Philippe or Rolex watch, leather Oxford shoes, silver cufflinks for formal
+- Avoid shorts, sleeveless, or overly casual pieces for religious/formal Gulf occasions
+
 Rules:
 - If the user mentions a piece they own, INCLUDE it exactly in the primary outfit — then build around it to flatter their shape.
 - If the request is a joke-inspired/off-topic detour prompt, make a wearable outfit that reflects the joke through mood, color, or one witty detail. Do not make it a costume.
@@ -87,27 +87,12 @@ interface GeneratedOutfitForImage {
   skin_tone_match?: boolean
 }
 
-function seedFromQuery(query: string): number {
-  return Math.abs([...query].reduce((acc, c) => (acc * 31 + c.charCodeAt(0)) | 0, 0)) % 2147483647
-}
-
-function buildImagePrompt(o: GeneratedOutfitForImage, gender?: string | null): string {
-  return buildCatalogMannequinImagePrompt({
-    gender,
-    pieces: [o.top_wear, o.bottom_wear, o.shoes, o.accessories, o.outerwear],
-    style: o.style || o.outfit_name,
-    colorScheme: o.color_scheme,
-    colors: o.key_colors,
-    extraDetails: [o.when_to_wear],
-  })
-}
-
 export async function POST(req: NextRequest) {
   const rl = rateLimit(req, { limit: 10, window: 60 })
   if (!rl.ok) return NextResponse.json({ error: 'Too many requests' }, { status: 429, headers: { 'Retry-After': String(rl.retryAfter) } })
 
   try {
-    const { query, gender, skin_tone, body_shape, height, style_pref, language } = await req.json()
+    const { query, gender, skin_tone, body_shape, height, style_pref, language, weather, avatar_url } = await req.json()
     const responseLanguage = language === 'ar' ? 'Arabic' : 'English'
     if (!query) return NextResponse.json({ error: 'query required' }, { status: 400 })
 
@@ -119,13 +104,17 @@ export async function POST(req: NextRequest) {
       style_pref && `Style preference: ${style_pref}`,
     ].filter(Boolean).join('\n')
 
+    const weatherContext = weather?.city && weather?.temperature_c != null && weather?.condition
+      ? `\n\nWEATHER CONTEXT: ${weather.city} is currently ${weather.temperature_c}°C and ${weather.condition}. Factor this into your outfit — choose appropriate fabrics, layers, and pieces for this weather. Do not mention the weather explicitly in outfit_name, but reflect it in material and layering choices.`
+      : ''
+
     // 1. Generate outfit details via Groq (or fallback)
     const result = await chatWithFallback(
       [
         { role: 'system', content: SYSTEM },
         {
           role: 'user',
-          content: `User request: "${query}"\n\nUSER PROFILE:\n${userProfile}\n\nBuild an outfit that directly answers the request AND flatters this user's body shape and skin tone. Write all user-facing outfit text in ${responseLanguage}. Return ONLY raw JSON starting with {`,
+          content: `User request: "${query}"\n\nUSER PROFILE:\n${userProfile}${weatherContext}\n\nBuild an outfit that directly answers the request AND flatters this user's body shape and skin tone. Write all user-facing outfit text in ${responseLanguage}. Return ONLY raw JSON starting with {`,
         },
       ],
       { maxTokens: 1000, temperature: 0.75 },
@@ -134,98 +123,26 @@ export async function POST(req: NextRequest) {
     const outfit = extractJSON(result.content) as GeneratedOutfitForImage
     outfit.gender = gender || 'male'
 
-    // 2. Build image URLs, preferring Magnific/EdenAI when configured
-    const token = process.env.POLLINATIONS_TOKEN
-    function pollinationsUrl(prompt: string, seed: number): string {
-      const params = new URLSearchParams({
-        width: '512', height: '768',
-        nologo: 'true', model: 'flux',
-        seed: String(seed),
-        ...(token ? { token } : {}),
-      })
-      return `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?${params}`
+    // 2. Build image URLs on a clean mannequin
+    const primaryImage = await generateMannequinOutfitImage(outfit, seedFromString(query), outfit.gender)
+    let image_url = primaryImage.url
+    if (avatar_url) {
+      const { compositeAvatar } = await import('@/lib/avatarComposition')
+      image_url = await compositeAvatar(image_url, avatar_url)
     }
-
-    async function generatedImageUrl(o: GeneratedOutfitForImage, seed: number): Promise<{ url: string; provider: string }> {
-      const prompt = buildImagePrompt(o, o.gender || outfit.gender)
-
-      if (hasFalImageConfig()) {
-        try {
-          const { resourceUrl, dataUrl } = await generateFalImage(prompt)
-          return { url: resourceUrl || dataUrl, provider: 'fal-flux-pro' }
-        } catch (err) {
-          const message = err instanceof Error ? err.message : 'Unknown error'
-          console.warn('[outfit-generate] FAL.ai failed:', message)
-        }
-      }
-
-      if (hasSkyworkImageConfig()) {
-        try {
-          const { resourceUrl, dataUrl } = await generateSkyworkImage(prompt)
-          return { url: resourceUrl || dataUrl, provider: 'skywork' }
-        } catch (err) {
-          const message = err instanceof Error ? err.message : 'Unknown error'
-          console.warn('[outfit-generate] Skywork failed:', message)
-        }
-      }
-
-      if (hasMagnificImageConfig()) {
-        try {
-          const { resourceUrl, dataUrl } = await generateMagnificMysticImage(prompt)
-          return { url: resourceUrl || dataUrl, provider: 'magnific-mystic' }
-        } catch (err) {
-          const message = err instanceof Error ? err.message : 'Unknown error'
-          console.warn('[outfit-generate] Magnific failed:', message)
-        }
-      }
-
-      if (hasEdenAIImageConfig()) {
-        try {
-          const { dataUrl, resourceUrl } = await generateEdenAIImage(prompt)
-          return { url: resourceUrl || dataUrl, provider: 'edenai-seedream' }
-        } catch (err) {
-          const message = err instanceof Error ? err.message : 'Unknown error'
-          console.warn('[outfit-generate] EdenAI failed:', message)
-        }
-      }
-
-      const openAIKeys = getOpenAIKeys()
-      for (const apiKey of openAIKeys) {
-        try {
-          const client = new OpenAI({ apiKey, timeout: 90_000 })
-          const enhancedPrompt = `Fashion product catalog photograph. ${prompt}. Pure white seamless studio background, full-body centered composition from head to shoes. Soft studio lighting, crisp realistic garment texture. Smooth white faceless mannequin, no facial features, no skin, no hair. No text, no watermarks, no props.`
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const response = await (client.images.generate as any)({
-            model: 'gpt-image-1',
-            prompt: enhancedPrompt,
-            size: '1024x1536',
-            quality: 'high',
-            n: 1,
-          }) as { data?: Array<{ b64_json?: string; url?: string }> }
-          const b64 = response.data?.[0]?.b64_json
-          if (b64) return { url: `data:image/png;base64,${b64}`, provider: 'gpt-image-2' }
-          const imageUrl = response.data?.[0]?.url
-          if (imageUrl) return { url: imageUrl, provider: 'gpt-image-2' }
-        } catch (err) {
-          const message = err instanceof Error ? err.message : 'Unknown error'
-          console.warn('[outfit-generate] GPT Image 2 failed:', message)
-        }
-      }
-
-      return { url: pollinationsUrl(prompt, seed), provider: 'pollinations' }
-    }
-
-    const primaryImage = await generatedImageUrl(outfit, seedFromQuery(query))
-    const image_url = primaryImage.url
 
     // 3. Build alternative URL if the primary doesn't suit the skin tone
     let alternative_image_url: string | null = null
     let alternative_image_provider: string | null = null
     if (outfit.alternative && outfit.skin_tone_match === false) {
       outfit.alternative.gender = outfit.gender
-      const alternativeImage = await generatedImageUrl(outfit.alternative, seedFromQuery(query + '_alt'))
+      const alternativeImage = await generateMannequinOutfitImage(outfit.alternative, seedFromString(`${query}_alt`), outfit.gender)
       alternative_image_url = alternativeImage.url
       alternative_image_provider = alternativeImage.provider
+      if (avatar_url) {
+        const { compositeAvatar } = await import('@/lib/avatarComposition')
+        alternative_image_url = await compositeAvatar(alternative_image_url, avatar_url)
+      }
     }
 
     return NextResponse.json({

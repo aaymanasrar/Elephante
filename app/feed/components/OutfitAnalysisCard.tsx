@@ -78,7 +78,17 @@ function finalRatingOutOf10(analysis: Analysis) {
   return Math.max(0, Math.min(10, Math.round(average * 10) / 10))
 }
 
-export default function OutfitAnalysisCard({ analysis, isAr }: { analysis: Analysis; isAr?: boolean }) {
+export default function OutfitAnalysisCard({
+  analysis,
+  isAr,
+  onFindSimilar,
+  onRestyle,
+}: {
+  analysis: Analysis
+  isAr?: boolean
+  onFindSimilar?: () => void
+  onRestyle?: () => void
+}) {
   const hasScores = [analysis.match_score, analysis.proportion_score, analysis.color_harmony_score].some((s) => s != null)
   const finalRating = finalRatingOutOf10(analysis)
   const pieces = (analysis.pieces || []).filter((p) => {
@@ -235,6 +245,27 @@ export default function OutfitAnalysisCard({ analysis, isAr }: { analysis: Analy
           <div className="pt-3 border-t border-zinc-800/50 flex items-baseline justify-between gap-4">
             <p className="text-[8px] uppercase tracking-[0.28em] text-zinc-600">{t.finalRating}</p>
             <p className="text-lg font-semibold text-white tabular-nums">{finalRating}/10</p>
+          </div>
+        ) : null}
+
+        {(onFindSimilar || onRestyle) ? (
+          <div className={`pt-3 border-t border-zinc-800/50 flex gap-2 ${finalRating == null ? 'mt-1' : ''}`}>
+            {onFindSimilar ? (
+              <button
+                onClick={onFindSimilar}
+                className="flex-1 px-3 py-2.5 rounded-full bg-white text-black text-[10px] font-bold uppercase tracking-[0.15em] hover:bg-zinc-200 transition-all duration-300 active:scale-95"
+              >
+                {isAr ? 'إطلالات مشابهة ←' : 'Similar looks →'}
+              </button>
+            ) : null}
+            {onRestyle ? (
+              <button
+                onClick={onRestyle}
+                className="flex-1 px-3 py-2.5 rounded-full border border-zinc-700 text-zinc-300 text-[10px] hover:border-white hover:text-white transition-all duration-300 active:scale-95"
+              >
+                {isAr ? 'أعد التنسيق' : 'Restyle it'}
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>

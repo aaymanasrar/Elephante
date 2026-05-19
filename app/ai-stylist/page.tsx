@@ -16,6 +16,7 @@ import { useArabicTranslations } from '@/hooks/useArabicTranslations'
 const OCCASIONS = [
   'Everyday', 'Office', 'Date Night', 'Weekend',
   'Formal Event', 'Wedding Guest', 'Travel', 'Gallery / Art', 'Festival',
+  'Eid', 'Ramadan', 'Majlis', 'National Day',
 ]
 
 const VIBES = [
@@ -41,11 +42,20 @@ const PIECE_LABELS_AR: Record<string, string> = {
   accessories: 'إضافات',
 }
 
+interface WeatherData {
+  city:          string
+  temperature_c: number
+  condition:     string
+  wind_kph:      number
+}
+
 const stylistCopy = {
   en: {
     title: 'AI Stylist',
     occasion: 'Occasion',
     vibe: 'Your Vibe',
+    weather: 'Weather',
+    weatherPlaceholder: 'e.g. Dubai, London, Riyadh',
     season: 'Season',
     curating: 'Curating your looks...',
     generate: 'Generate Looks',
@@ -66,6 +76,8 @@ const stylistCopy = {
     title: 'AI Stylist',
     occasion: 'المناسبة',
     vibe: 'الأجواء',
+    weather: 'الطقس',
+    weatherPlaceholder: 'مثال: دبي، لندن، الرياض',
     season: 'الموسم',
     curating: 'جارٍ تنسيق الإطلالات...',
     generate: 'توليد إطلالات',
@@ -135,6 +147,12 @@ interface Profile {
   [key: string]: unknown
 }
 
+interface DuplicateResult {
+  has_duplicate: boolean
+  similar_item: string | null
+  similarity_reason: string | null
+}
+
 function OutfitCard({
   outfit,
   index,
@@ -158,6 +176,8 @@ function OutfitCard({
   const [generatedImage, setGeneratedImage] = useState<string | null>(null)
   const [visualizing, setVisualizing]       = useState(false)
   const [imgError, setImgError]             = useState('')
+  const [checkingCloset, setCheckingCloset] = useState(false)
+  const [duplicates, setDuplicates]         = useState<Record<string, DuplicateResult | null>>({})
 
   const visualize = async (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -176,6 +196,42 @@ function OutfitCard({
       setImgError(copy.imageError)
     } finally {
       setVisualizing(false)
+    }
+  }
+
+  const checkCloset = async () => {
+    if (!profile?.userId) return
+    setCheckingCloset(true)
+    const pieces = outfit.pieces || {}
+    const piecesWithShopLink = (Object.keys(PIECE_LABELS) as (keyof OutfitPieces)[]).filter((key) => {
+      const piece = pieces[key]
+      return piece?.item && getBrandShopLink(piece.brand, piece.item, gender)
+    })
+    try {
+      const results = await Promise.allSettled(
+        piecesWithShopLink.map(async (key) => {
+          const piece = pieces[key]!
+          const description = piece.brand ? `${piece.brand} ${piece.item}` : piece.item
+          const res = await fetch('/api/check-duplicate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ item_description: description, user_id: profile.userId }),
+          })
+          const data = await res.json()
+          return { key, data }
+        })
+      )
+      const next: Record<string, DuplicateResult | null> = {}
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          next[result.value.key] = result.value.data
+        }
+      }
+      setDuplicates(next)
+    } catch {
+      // Progressive enhancement — fail silently
+    } finally {
+      setCheckingCloset(false)
     }
   }
 
@@ -223,22 +279,62 @@ function OutfitCard({
           const piece = outfit.pieces?.[key]
           if (!piece?.item) return null
           const shop = getBrandShopLink(piece.brand, piece.item, gender)
+          const dupResult = duplicates[key]
+          const hasDup = dupResult?.has_duplicate === true
           return (
             <div key={key} className="flex gap-3 items-start">
               <span className={`text-[9px] text-zinc-700 w-12 flex-shrink-0 pt-1 ${isAr ? '' : 'uppercase tracking-[0.2em]'}`}>{isAr ? PIECE_LABELS_AR[key] : PIECE_LABELS[key]}</span>
-              <div className="flex-1 flex items-start justify-between gap-2 min-w-0">
-                <span className="text-[12px] text-zinc-200 leading-snug flex-1">{tr(piece.item)}</span>
-                {shop && (
-                  <a href={shop.url} target="_blank" rel="noopener noreferrer"
-                    className="flex-shrink-0 px-2.5 py-1 rounded-full border border-zinc-800 text-[9px] uppercase tracking-widest text-zinc-400 hover:border-white/40 hover:text-white transition-all duration-200 whitespace-nowrap"
-                    onClick={e => e.stopPropagation()}>
-                    {piece.brand || shop.label}
-                  </a>
-                )}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-start justify-between gap-2">
+                  <span className="text-[12px] text-zinc-200 leading-snug flex-1">{tr(piece.item)}</span>
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    {hasDup && (
+                      <div className="group relative">
+                        <div className="w-2 h-2 rounded-full bg-yellow-500/80 flex-shrink-0 cursor-default" />
+                        <div className="absolute bottom-full right-0 mb-1.5 w-44 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-[10px] text-zinc-300 leading-snug opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity duration-200 z-10 shadow-xl">
+                          <p className="font-semibold text-yellow-400 mb-0.5">{isAr ? 'قد تملكه' : 'You may own this'}</p>
+                          {dupResult?.similar_item && <p className="text-zinc-400">{dupResult.similar_item}</p>}
+                          {dupResult?.similarity_reason && <p className="text-zinc-500 mt-0.5">{dupResult.similarity_reason}</p>}
+                        </div>
+                      </div>
+                    )}
+                    {shop && (
+                      <a href={shop.url} target="_blank" rel="noopener noreferrer"
+                        className="px-2.5 py-1 rounded-full border border-zinc-800 text-[9px] uppercase tracking-widest text-zinc-400 hover:border-white/40 hover:text-white transition-all duration-200 whitespace-nowrap"
+                        onClick={e => e.stopPropagation()}>
+                        {piece.brand || shop.label}
+                      </a>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           )
         })}
+        {/* ── Check my closet ── */}
+        {profile?.userId && (
+          <div className="pt-1">
+            <button
+              onClick={checkCloset}
+              disabled={checkingCloset}
+              className="flex items-center gap-1.5 text-[9px] uppercase tracking-[0.2em] text-zinc-700 hover:text-zinc-400 transition-colors disabled:opacity-40"
+            >
+              {checkingCloset ? (
+                <>
+                  <span className="w-2.5 h-2.5 border border-zinc-700 border-t-zinc-400 rounded-full animate-spin" />
+                  {isAr ? 'جارٍ الفحص...' : 'Checking...'}
+                </>
+              ) : (
+                <>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18" />
+                  </svg>
+                  {isAr ? 'فحص خزانتي' : 'Check my closet'}
+                </>
+              )}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* ── How to wear ── */}
@@ -344,6 +440,8 @@ export default function AIStylist() {
   const [occasion, setOccasion]           = useState('Everyday')
   const [selectedVibes, setSelectedVibes] = useState<string[]>([])
   const [season, setSeason]               = useState('')
+  const [city, setCity]                   = useState('')
+  const [weatherData, setWeatherData]     = useState<WeatherData | null>(null)
 
   useEffect(() => {
     const load = async () => {
@@ -360,6 +458,24 @@ export default function AIStylist() {
   const toggleVibe = (v: string) =>
     setSelectedVibes(prev => prev.includes(v) ? prev.filter(x => x !== v) : [...prev, v])
 
+  const fetchWeather = async (cityName: string) => {
+    const trimmed = cityName.trim()
+    if (!trimmed) { setWeatherData(null); return }
+    try {
+      const res = await fetch('/api/weather', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ city: trimmed }),
+      })
+      if (!res.ok) { setWeatherData(null); return }
+      const data: WeatherData = await res.json()
+      if (data.city) setWeatherData(data)
+      else setWeatherData(null)
+    } catch {
+      setWeatherData(null)
+    }
+  }
+
   const generate = async () => {
     setGenerating(true)
     setError('')
@@ -367,11 +483,14 @@ export default function AIStylist() {
     setSavedNames(new Set())
 
     try {
-      const mood = selectedVibes.join(', ') || 'balanced'
-      const res  = await fetch('/api/outfit-ai', {
+      const mood    = selectedVibes.join(', ') || 'balanced'
+      const weather = weatherData
+        ? { city: weatherData.city, temperature_c: weatherData.temperature_c, condition: weatherData.condition }
+        : undefined
+      const res = await fetch('/api/outfit-ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ profile, occasion, mood, season, language: lang }),
+        body: JSON.stringify({ profile, occasion, mood, season, language: lang, weather }),
       })
       const data = await res.json()
       if (data.error) { setError(data.error); return }
@@ -460,6 +579,33 @@ export default function AIStylist() {
                     selectedVibes.includes(v) ? 'bg-white text-black border-white shadow-[0_0_12px_rgba(255,255,255,0.15)]' : 'bg-transparent text-zinc-500 border-zinc-800 hover:border-zinc-600 hover:text-zinc-300'
                   }`}>{trControl(v)}</button>
               ))}
+            </div>
+          </section>
+
+          {/* ── Weather ── */}
+          <section>
+            <p className="text-[10px] uppercase tracking-[0.25em] text-zinc-500 mb-4">{copy.weather}</p>
+            <div className="space-y-2.5">
+              <input
+                type="text"
+                value={city}
+                onChange={e => { setCity(e.target.value); if (!e.target.value.trim()) setWeatherData(null) }}
+                onBlur={e => fetchWeather(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { (e.target as HTMLInputElement).blur(); fetchWeather(city) } }}
+                placeholder={copy.weatherPlaceholder}
+                className="w-full bg-transparent border border-zinc-800 rounded-full px-4 py-2.5 text-[12px] text-zinc-300 placeholder-zinc-700 focus:outline-none focus:border-zinc-600 transition-colors"
+              />
+              {weatherData && (
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-zinc-800 bg-zinc-950 text-[10px] text-zinc-400">
+                    <span className="text-zinc-200">{weatherData.city}</span>
+                    <span className="text-zinc-700">·</span>
+                    <span>{weatherData.temperature_c}°C</span>
+                    <span className="text-zinc-700">·</span>
+                    <span>{weatherData.condition}</span>
+                  </span>
+                </div>
+              )}
             </div>
           </section>
 

@@ -322,7 +322,11 @@ export async function POST(req: NextRequest) {
   if (!rl.ok) return NextResponse.json({ error: 'Too many requests' }, { status: 429, headers: { 'Retry-After': String(rl.retryAfter) } })
 
   try {
-    const { profile, occasion, mood, season, language } = await req.json()
+    const { profile, occasion, mood, season, language, weather } = await req.json()
+
+    const weatherLine = weather?.city && weather?.temperature_c != null && weather?.condition
+      ? `\n- Current weather: ${weather.city} is ${weather.temperature_c}°C and ${weather.condition}. Factor this into your outfit — choose appropriate fabrics, layers, and pieces for this weather. Do not mention the weather explicitly in outfit_name, but reflect it in material and layering choices.`
+      : ''
 
     const userContext = `
 USER PROFILE:
@@ -338,7 +342,7 @@ CURRENT REQUEST:
 - Occasion to dress for: ${occasion || 'everyday casual'}
 - Mood / vibe they want: ${mood || 'balanced and put-together'}
 - Season: ${season || 'current season'}
-- Language for "why_it_works" and "styling_tip": ${language === 'ar' ? 'Arabic (keep outfit piece names in English)' : 'English'}
+- Language for "why_it_works" and "styling_tip": ${language === 'ar' ? 'Arabic (keep outfit piece names in English)' : 'English'}${weatherLine}
 
 RULES:
 - Use ONLY the MALE style list if gender is male, ONLY the FEMALE style list if gender is female.

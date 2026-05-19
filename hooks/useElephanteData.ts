@@ -18,6 +18,7 @@ interface ElephanteDataState {
   userPalettes: string[]
   userSkinTone: string
   userStylePref: string
+  userAvatarUrl: string
   setShowTour: Dispatch<SetStateAction<boolean>>
 }
 
@@ -34,6 +35,7 @@ export function useElephanteData(onUnauthenticated: () => void): ElephanteDataSt
   const [userPalettes, setUserPalettes] = useState<string[]>([])
   const [userSkinTone, setUserSkinTone] = useState('')
   const [userStylePref, setUserStylePref] = useState('')
+  const [userAvatarUrl, setUserAvatarUrl] = useState('')
 
   // Stable ref so the effect doesn't re-run when the parent re-renders with a new inline function
   const onUnauthenticatedRef = useRef(onUnauthenticated)
@@ -55,6 +57,7 @@ export function useElephanteData(onUnauthenticated: () => void): ElephanteDataSt
         setUserBodyShape(bootstrapData.userBodyShape)
         setUserHeight(bootstrapData.userHeight)
         setUserStylePref(bootstrapData.userStylePref)
+        setUserAvatarUrl(bootstrapData.userAvatarUrl)
         setUserId(bootstrapData.userId)
         allOutfitsRef.current = bootstrapData.outfits
         setAllOutfits(bootstrapData.outfits)
@@ -86,6 +89,7 @@ export function useElephanteData(onUnauthenticated: () => void): ElephanteDataSt
     userPalettes,
     userSkinTone,
     userStylePref,
+    userAvatarUrl,
     setShowTour,
   }
 }

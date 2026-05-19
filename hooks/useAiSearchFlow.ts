@@ -37,6 +37,7 @@ interface AiSearchFlowParams {
   userHeight: string
   userSkinTone: string
   userStylePref: string
+  userAvatarUrl?: string
   initialAiContext?: AiContext | null
   initialChatHistory?: ChatTurn[]
   initialCompletedQuery?: string
@@ -60,6 +61,7 @@ export function useAiSearchFlow({
   userHeight,
   userSkinTone,
   userStylePref,
+  userAvatarUrl = '',
   initialAiContext = null,
   initialChatHistory = [],
   initialCompletedQuery = '',
@@ -271,6 +273,7 @@ export function useAiSearchFlow({
           userHeight,
           userSkinTone,
           userStylePref,
+          avatar_url: userAvatarUrl,
           language,
         }, controller.signal)
 

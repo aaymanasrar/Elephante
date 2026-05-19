@@ -184,12 +184,22 @@ export async function POST(req: NextRequest) {
   try {
     const { outfit, profile } = await req.json()
     const prompt = buildPrompt(outfit, profile)
+    const avatarUrl = profile?.avatar_url
+
+    const respond = async (imageSrc: string, provider: string, extra = {}) => {
+      let finalImg = imageSrc
+      if (avatarUrl) {
+        const { compositeAvatar } = await import('@/lib/avatarComposition')
+        finalImg = await compositeAvatar(finalImg, avatarUrl)
+      }
+      return NextResponse.json({ image: finalImg, provider, ...extra })
+    }
 
     // 1. FAL.ai — FLUX Pro v1.1, photorealistic fashion quality
     if (hasFalImageConfig()) {
       try {
         const { dataUrl, model } = await generateFalImage(prompt)
-        return NextResponse.json({ image: dataUrl, provider: 'fal-flux-pro', model })
+        return await respond(dataUrl, 'fal-flux-pro', { model })
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error'
         console.warn('[generate-outfit-image] FAL.ai failed:', message)
@@ -200,7 +210,7 @@ export async function POST(req: NextRequest) {
     if (hasSkyworkImageConfig()) {
       try {
         const { dataUrl, model, resourceUrl } = await generateSkyworkImage(prompt)
-        return NextResponse.json({ image: dataUrl, provider: 'skywork', model, resourceUrl })
+        return await respond(dataUrl, 'skywork', { model, resourceUrl })
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error'
         console.warn('[generate-outfit-image] Skywork failed:', message)
@@ -211,7 +221,7 @@ export async function POST(req: NextRequest) {
     if (hasMagnificImageConfig()) {
       try {
         const { dataUrl, model, taskId } = await generateMagnificMysticImage(prompt)
-        return NextResponse.json({ image: dataUrl, provider: 'magnific-mystic', model, taskId })
+        return await respond(dataUrl, 'magnific-mystic', { model, taskId })
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error'
         console.warn('[generate-outfit-image] Magnific failed:', message)
@@ -222,7 +232,7 @@ export async function POST(req: NextRequest) {
     if (hasEdenAIImageConfig()) {
       try {
         const { dataUrl, cost, model } = await generateEdenAIImage(prompt)
-        return NextResponse.json({ image: dataUrl, provider: 'edenai-seedream', model, cost })
+        return await respond(dataUrl, 'edenai-seedream', { model, cost })
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error'
         console.warn('[generate-outfit-image] EdenAI failed:', message)
@@ -233,7 +243,7 @@ export async function POST(req: NextRequest) {
     if (process.env.HIGGSFIELD_API_KEY_ID && process.env.HIGGSFIELD_API_KEY_SECRET) {
       try {
         const image = await generateWithHiggsfield(prompt)
-        return NextResponse.json({ image, provider: 'higgsfield' })
+        return await respond(image, 'higgsfield')
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error'
         console.warn('[generate-outfit-image] Higgsfield failed:', message)
@@ -248,7 +258,7 @@ export async function POST(req: NextRequest) {
         for (const [index, apiKey] of openAIKeys.entries()) {
           try {
             const image = await generateWithGptImage2(prompt, apiKey)
-            return NextResponse.json({ image, provider: index === 0 ? 'gpt-image-2' : `gpt-image-2-backup-${index + 1}` })
+            return await respond(image, index === 0 ? 'gpt-image-2' : `gpt-image-2-backup-${index + 1}`)
           } catch (err) {
             lastGptImg2Error = err
             const message = err instanceof Error ? err.message : 'Unknown error'
@@ -269,7 +279,7 @@ export async function POST(req: NextRequest) {
         for (const [index, apiKey] of openAIKeys.entries()) {
           try {
             const image = await generateWithDallE3(prompt, apiKey)
-            return NextResponse.json({ image, provider: index === 0 ? 'dalle3' : `dalle3-backup-${index + 1}` })
+            return await respond(image, index === 0 ? 'dalle3' : `dalle3-backup-${index + 1}`)
           } catch (err) {
             lastDallEError = err
             const message = err instanceof Error ? err.message : 'Unknown error'
@@ -287,10 +297,11 @@ export async function POST(req: NextRequest) {
 
     // 8. Pollinations — free fallback (FLUX)
     const image = await generateWithPollinations(prompt)
-    return NextResponse.json({ image, provider: 'pollinations' })
+    return await respond(image, 'pollinations')
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err)
     console.error('[generate-outfit-image]', message)
     return NextResponse.json({ error: friendlyError(err) }, { status: 500 })
   }
 }
+

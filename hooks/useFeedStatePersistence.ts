@@ -23,6 +23,7 @@ interface FeedStatePersistenceParams<TAiContext, TGeneratedOutfit> {
 }
 
 export const FEED_STATE_KEY = 'elephante_feed_state'
+export const FEED_LAST_URL_KEY = 'elephante_last_feed_url'
 
 function isPersistedFeedState<TAiContext, TGeneratedOutfit>(state: unknown): state is PersistedFeedState<TAiContext, TGeneratedOutfit> {
   return Boolean(state && typeof state === 'object' && typeof (state as { searchQuery?: unknown }).searchQuery === 'string')
@@ -48,7 +49,7 @@ export function readFeedStateForQuery<TAiContext, TGeneratedOutfit>(query: strin
   if (typeof window === 'undefined' || !query) return null
 
   try {
-    const saved = sessionStorage.getItem(FEED_STATE_KEY)
+    const saved = localStorage.getItem(FEED_STATE_KEY) || sessionStorage.getItem(FEED_STATE_KEY)
     if (!saved) return null
 
     const state: unknown = JSON.parse(saved)
@@ -63,7 +64,28 @@ export function readFeedStateForQuery<TAiContext, TGeneratedOutfit>(query: strin
 
 function writeFeedState<TAiContext, TGeneratedOutfit>(state: PersistedFeedState<TAiContext, TGeneratedOutfit>) {
   try {
-    sessionStorage.setItem(FEED_STATE_KEY, JSON.stringify(state))
+    const serialized = JSON.stringify(state)
+    localStorage.setItem(FEED_STATE_KEY, serialized)
+    sessionStorage.setItem(FEED_STATE_KEY, serialized)
+  } catch {}
+}
+
+export function readLastFeedUrl() {
+  if (typeof window === 'undefined') return ''
+
+  try {
+    const url = localStorage.getItem(FEED_LAST_URL_KEY) || ''
+    return url.startsWith('/feed') ? url : ''
+  } catch {
+    return ''
+  }
+}
+
+export function writeLastFeedUrl(url: string) {
+  if (typeof window === 'undefined' || !url.startsWith('/feed')) return
+
+  try {
+    localStorage.setItem(FEED_LAST_URL_KEY, url)
   } catch {}
 }
 
@@ -92,7 +114,6 @@ export function useFeedStatePersistence<TAiContext, TGeneratedOutfit>({
 
   useEffect(() => {
     if (!searchQuery) {
-      try { sessionStorage.removeItem(FEED_STATE_KEY) } catch {}
       return
     }
 

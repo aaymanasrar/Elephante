@@ -52,6 +52,16 @@ Common AI / server-side keys used by routes and scripts:
 - `HIGGSFIELD_API_KEY_ID`
 - `HIGGSFIELD_API_KEY_SECRET`
 
+Optional wardrobe image cleanup:
+
+- `SAM_SEGMENTATION_URL` — optional clothing cutout service endpoint; Elephante sends multipart `image` and accepts an image response or JSON containing `image_base64`, `image`, `data_url`, `url`, or `output`
+- `SAM_SEGMENTATION_TIMEOUT_MS` — defaults to `90000`
+- `WARDROBE_BACKGROUND_REMOVAL_MODEL` — local no-key background-removal model: `small`, `medium`, or `large`; defaults to `medium`
+- `WARDROBE_BACKGROUND_REMOVAL_DEBUG` — set to `true` for local model debug output
+- `WARDROBE_PRETTIFY_ENABLED` — set to `false` to disable OpenAI image cleanup fallback
+- `WARDROBE_PRETTIFY_MODEL` — defaults to `gpt-image-1`
+- `WARDROBE_PRETTIFY_QUALITY` — `low`, `medium`, `high`, or `auto`; defaults to `medium`
+
 Optional provider keys supported by the AI service layer:
 
 - `ANTHROPIC_API_KEY`

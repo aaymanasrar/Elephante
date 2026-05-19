@@ -44,6 +44,8 @@ interface SearchFooterProps {
   onAnalyzeAttachment?: () => void
   onInputChange: (value: string) => void
   onRateAttachment?: () => void
+  onFindSimilar?: () => void
+  onRestyle?: () => void
   placeholderOverlay?: ReactNode
   onSubmit: () => void
 }
@@ -63,13 +65,15 @@ export default function SearchFooter({
   onAnalyzeAttachment,
   onInputChange,
   onRateAttachment,
+  onFindSimilar,
+  onRestyle,
   placeholderOverlay,
   onSubmit,
 }: SearchFooterProps) {
   const { isAr } = useLocale()
   const [draggingPhoto, setDraggingPhoto] = useState(false)
   const copy = isAr ? {
-    identifying: 'جارٍ التعرّف...',
+    identifying: 'جارٍ التنظيف...',
     checking: 'جارٍ التحليل...',
     detected: 'ما وجدته',
     styleCheck: 'تحليل الإطلالة',
@@ -81,7 +85,7 @@ export default function SearchFooter({
     readyToAnalyze: 'جاهز للتحليل',
     search: 'بحث',
   } : {
-    identifying: 'Identifying...',
+    identifying: 'Polishing...',
     checking: 'Checking...',
     detected: 'What I see',
     styleCheck: 'Style Check',
@@ -94,7 +98,7 @@ export default function SearchFooter({
     search: 'Search',
   }
   const canUseAttachment = Boolean(attachment?.image_url && !attachment.uploading)
-  const canSubmit = Boolean(inputValue.trim()) || canUseAttachment
+  const canSubmit = (!attachment?.uploading && Boolean(inputValue.trim())) || canUseAttachment
   const detectedPieces = visibleLabels(attachmentAnalysis?.pieces || [])
   const uploadedPieces = visibleLabels(attachment?.pieces || [])
   const fallbackTags = attachment?.tags
@@ -112,6 +116,7 @@ export default function SearchFooter({
       ? copy.checkAgain
       : copy.styleCheck
   const actionHandler = attachmentAnalysisMode === 'rating' ? onAnalyzeAttachment : onRateAttachment
+  const attachmentImageSrc = attachment?.image_url || ''
   const firstImageFile = (files: FileList | File[]) => {
     return Array.from(files).find((file) => file.type.startsWith('image/')) || null
   }
@@ -185,7 +190,17 @@ export default function SearchFooter({
           <div className="mb-2.5 bg-zinc-950/55 backdrop-blur-md border border-white/10 rounded-2xl px-3 py-3 space-y-3 shadow-[0_12px_40px_rgba(0,0,0,0.25)]" dir={isAr ? 'rtl' : 'ltr'}>
             <div className="flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-lg overflow-hidden bg-zinc-800 flex-shrink-0 relative">
-                <Image src={attachment.preview} alt="" fill className="object-cover" unoptimized aria-hidden="true" />
+                {attachmentImageSrc ? (
+                  <Image src={attachmentImageSrc} alt="" fill className="object-contain bg-zinc-950" unoptimized aria-hidden="true" />
+                ) : (
+                  <div className="w-full h-full bg-zinc-950 flex items-center justify-center text-zinc-500" aria-hidden="true">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <path d="M17 8l-5-5-5 5" />
+                      <path d="M12 3v12" />
+                    </svg>
+                  </div>
+                )}
               </div>
               <div className="flex-1 min-w-0">
                 {attachment.uploading ? (
@@ -249,6 +264,29 @@ export default function SearchFooter({
                 >
                   {actionLabel}
                 </button>
+
+                {(onFindSimilar || onRestyle) && !attachmentAnalysisMode ? (
+                  <div className="flex gap-2">
+                    {onFindSimilar ? (
+                      <button
+                        onClick={onFindSimilar}
+                        disabled={!canUseAttachment || isAnalyzingAttachment}
+                        className="flex-1 rounded-full border border-zinc-700 text-zinc-300 text-[10px] uppercase tracking-[0.12em] py-2 hover:border-white hover:text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {isAr ? 'مشابهة ←' : 'Similar looks →'}
+                      </button>
+                    ) : null}
+                    {onRestyle ? (
+                      <button
+                        onClick={onRestyle}
+                        disabled={!canUseAttachment || isAnalyzingAttachment}
+                        className="flex-1 rounded-full border border-zinc-700 text-zinc-300 text-[10px] uppercase tracking-[0.12em] py-2 hover:border-white hover:text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {isAr ? 'أعد التنسيق' : 'Restyle it'}
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
               </>
             ) : null}
           </div>
@@ -300,7 +338,7 @@ export default function SearchFooter({
                 </svg>
               </button>
             ) : null}
-            {isThinking ? (
+            {isThinking || isAnalyzingAttachment ? (
               <div className={`absolute ${isAr ? 'left-5' : 'right-5'} top-1/2 -translate-y-1/2 flex gap-[3px] items-center`} aria-hidden="true">
                 <span className="w-1.5 h-1.5 rounded-full bg-white/60 animate-bounce" style={{ animationDelay: '0ms' }} />
                 <span className="w-1.5 h-1.5 rounded-full bg-white/40 animate-bounce" style={{ animationDelay: '120ms' }} />

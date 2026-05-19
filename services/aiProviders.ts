@@ -6,6 +6,54 @@ import OpenAI from 'openai'
 import Anthropic from '@anthropic-ai/sdk'
 import { getOpenAIKeys, isOpenAIQuotaError } from '@/lib/openaiKeys'
 
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+export function parseGeminiCapacityError(err: any): { isCapacityError: boolean; retryDelaySeconds?: number } {
+  if (!err) return { isCapacityError: false }
+
+  const errObject = err.error || err
+  const status = err.status || errObject?.code || errObject?.status
+  const message = `${err.message || ''} ${errObject?.message || ''}`.toLowerCase()
+
+  let isCapacityError = false
+  let retryDelaySeconds: number | undefined
+
+  const details = errObject?.details || err?.details
+  if (Array.isArray(details)) {
+    for (const detail of details) {
+      if (
+        detail?.reason === 'MODEL_CAPACITY_EXHAUSTED' ||
+        (detail?.['@type']?.includes('ErrorInfo') && detail?.reason === 'MODEL_CAPACITY_EXHAUSTED')
+      ) {
+        isCapacityError = true
+      }
+      if (detail?.retryDelay) {
+        const delayStr = String(detail.retryDelay)
+        const match = delayStr.match(/^(\d+(?:\.\d+)?)\s*s?$/i)
+        if (match && match[1]) {
+          retryDelaySeconds = parseFloat(match[1])
+        }
+      }
+    }
+  }
+
+  if (!isCapacityError) {
+    if (
+      status === 503 ||
+      message.includes('model_capacity_exhausted') ||
+      message.includes('capacity_exhausted') ||
+      message.includes('overloaded') ||
+      (message.includes('capacity') && message.includes('exhausted')) ||
+      (message.includes('model') && message.includes('exhausted')) ||
+      message.includes('temporarily unavailable')
+    ) {
+      isCapacityError = true
+    }
+  }
+
+  return { isCapacityError, retryDelaySeconds }
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // PASTE YOUR CLAUDE API KEY IN .env.local:
 //   ANTHROPIC_API_KEY=sk-ant-...
@@ -159,21 +207,41 @@ export async function chatWithFallback(
   let lastError: Error | null = null
 
   for (const provider of available.filter(p => !p.name.startsWith('OpenAI'))) {
-    try {
-      const extraHeaders = provider.name === 'OpenRouter'
-        ? { 'HTTP-Referer': 'https://elephante.app', 'X-OpenRouter-Title': 'Elephante' }
-        : {}
-      const client = new OpenAI({ apiKey: provider.apiKey!, baseURL: provider.baseURL, timeout: 25000, maxRetries: 0, defaultHeaders: extraHeaders })
-      const completion = await client.chat.completions.create({
-        model: provider.model, messages, temperature: temp,
-        ...(maxTok ? { max_tokens: maxTok } : {}),
-      })
-      const content = completion.choices[0]?.message?.content || ''
-      return { content, provider: provider.name, model: provider.model }
-    } catch (err: any) {
-      const reason = isOpenAIQuotaError(err) ? 'quota/rate limit' : err.message
-      console.warn(`[ai] ${provider.name} failed: ${reason} — trying next`)
-      lastError = err
+    let attempts = 0
+    const maxAttempts = 2
+    
+    while (attempts < maxAttempts) {
+      attempts++
+      try {
+        const extraHeaders = provider.name === 'OpenRouter'
+          ? { 'HTTP-Referer': 'https://elephante.app', 'X-OpenRouter-Title': 'Elephante' }
+          : {}
+        const client = new OpenAI({ apiKey: provider.apiKey!, baseURL: provider.baseURL, timeout: 25000, maxRetries: 0, defaultHeaders: extraHeaders })
+        const completion = await client.chat.completions.create({
+          model: provider.model, messages, temperature: temp,
+          ...(maxTok ? { max_tokens: maxTok } : {}),
+        })
+        const content = completion.choices[0]?.message?.content || ''
+        return { content, provider: provider.name, model: provider.model }
+      } catch (err: any) {
+        lastError = err
+        
+        const { isCapacityError, retryDelaySeconds } = parseGeminiCapacityError(err)
+        if (isCapacityError && attempts < maxAttempts) {
+          const delay = retryDelaySeconds ?? 3
+          if (delay <= 15) {
+            console.warn(`[ai] ${provider.name} capacity exhausted. Waiting for ${delay}s before retry (attempt ${attempts}/${maxAttempts})...`)
+            await sleep(delay * 1000)
+            continue
+          } else {
+            console.warn(`[ai] ${provider.name} capacity exhausted. Retry delay of ${delay}s exceeds threshold (15s) — falling back`)
+          }
+        }
+        
+        const reason = isOpenAIQuotaError(err) ? 'quota/rate limit' : err.message
+        console.warn(`[ai] ${provider.name} failed: ${reason} — trying next`)
+        break // Break retry loop to try the next provider
+      }
     }
   }
 
@@ -182,18 +250,38 @@ export async function chatWithFallback(
 
   const openaiProviders = available.filter(p => p.name.startsWith('OpenAI'))
   for (const openai of openaiProviders) {
-    try {
-      const client = new OpenAI({ apiKey: openai.apiKey!, timeout: 25000, maxRetries: 0 })
-      const completion = await client.chat.completions.create({
-        model: openai.model, messages, temperature: temp,
-        ...(maxTok ? { max_tokens: maxTok } : {}),
-      })
-      const content = completion.choices[0]?.message?.content || ''
-      return { content, provider: openai.name, model: openai.model }
-    } catch (err: any) {
-      const reason = isOpenAIQuotaError(err) ? 'quota/rate limit' : err.message
-      console.warn(`[ai] ${openai.name} failed: ${reason} — trying next`)
-      lastError = err
+    let attempts = 0
+    const maxAttempts = 2
+    
+    while (attempts < maxAttempts) {
+      attempts++
+      try {
+        const client = new OpenAI({ apiKey: openai.apiKey!, timeout: 25000, maxRetries: 0 })
+        const completion = await client.chat.completions.create({
+          model: openai.model, messages, temperature: temp,
+          ...(maxTok ? { max_tokens: maxTok } : {}),
+        })
+        const content = completion.choices[0]?.message?.content || ''
+        return { content, provider: openai.name, model: openai.model }
+      } catch (err: any) {
+        lastError = err
+        
+        const { isCapacityError, retryDelaySeconds } = parseGeminiCapacityError(err)
+        if (isCapacityError && attempts < maxAttempts) {
+          const delay = retryDelaySeconds ?? 3
+          if (delay <= 15) {
+            console.warn(`[ai] ${openai.name} capacity exhausted. Waiting for ${delay}s before retry (attempt ${attempts}/${maxAttempts})...`)
+            await sleep(delay * 1000)
+            continue
+          } else {
+            console.warn(`[ai] ${openai.name} capacity exhausted. Retry delay of ${delay}s exceeds threshold (15s) — falling back`)
+          }
+        }
+        
+        const reason = isOpenAIQuotaError(err) ? 'quota/rate limit' : err.message
+        console.warn(`[ai] ${openai.name} failed: ${reason} — trying next`)
+        break // Break retry loop to try next OpenAI provider
+      }
     }
   }
 
@@ -219,23 +307,43 @@ export async function analyzeImageWithFallback(
     label: string,
     extraHeaders: Record<string, string> = {},
   ): Promise<AIResponse | null> => {
-    try {
-      const client = new OpenAI({ apiKey, baseURL, timeout: 25000, maxRetries: 0, defaultHeaders: extraHeaders })
-      const completion = await client.chat.completions.create({
-        model,
-        messages: [{ role: 'user', content: [
-          ...images.map(image => ({ type: 'image_url' as const, image_url: { url: image.openAIUrl } })),
-          { type: 'text', text: prompt },
-        ]}],
-        max_tokens: 2048,
-      })
-      const content = completion.choices[0]?.message?.content || ''
-      return { content, provider: label, model }
-    } catch (err: any) {
-      console.warn(`[vision] ${label} failed: ${err.message}`)
-      lastError = err
-      return null
+    let attempts = 0
+    const maxAttempts = 2
+    
+    while (attempts < maxAttempts) {
+      attempts++
+      try {
+        const client = new OpenAI({ apiKey, baseURL, timeout: 25000, maxRetries: 0, defaultHeaders: extraHeaders })
+        const completion = await client.chat.completions.create({
+          model,
+          messages: [{ role: 'user', content: [
+            ...images.map(image => ({ type: 'image_url' as const, image_url: { url: image.openAIUrl } })),
+            { type: 'text', text: prompt },
+          ]}],
+          max_tokens: 2048,
+        })
+        const content = completion.choices[0]?.message?.content || ''
+        return { content, provider: label, model }
+      } catch (err: any) {
+        lastError = err
+        
+        const { isCapacityError, retryDelaySeconds } = parseGeminiCapacityError(err)
+        if (isCapacityError && attempts < maxAttempts) {
+          const delay = retryDelaySeconds ?? 3
+          if (delay <= 15) {
+            console.warn(`[vision] ${label} capacity exhausted. Waiting for ${delay}s before retry (attempt ${attempts}/${maxAttempts})...`)
+            await sleep(delay * 1000)
+            continue
+          } else {
+            console.warn(`[vision] ${label} capacity exhausted. Retry delay of ${delay}s exceeds threshold (15s) — falling back`)
+          }
+        }
+        
+        console.warn(`[vision] ${label} failed: ${err.message}`)
+        break
+      }
     }
+    return null
   }
 
   // 1. Google AI Studio — gemini-2.5-flash

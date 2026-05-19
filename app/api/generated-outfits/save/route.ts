@@ -6,9 +6,11 @@ import { rateLimit } from '@/lib/rateLimit'
 import type { GeneratedOutfitVariant } from '@/types/outfit'
 
 type SaveType = 'primary' | 'alternative'
+type SavedOutfitSource = 'excel' | 'ai_stylist' | 'manual'
 
 type SaveRequestBody = {
   type?: SaveType
+  source?: SavedOutfitSource
   outfit?: GeneratedOutfitVariant & { alternative?: GeneratedOutfitVariant | null }
   primaryOutfit?: GeneratedOutfitVariant | null
   image_url?: string | null
@@ -25,6 +27,10 @@ const GENERATED_BUCKET = process.env.GENERATED_OUTFITS_BUCKET || 'Outfits'
 
 function asSaveType(value: unknown): SaveType | null {
   return value === 'primary' || value === 'alternative' ? value : null
+}
+
+function asSavedOutfitSource(value: unknown): SavedOutfitSource {
+  return value === 'excel' || value === 'manual' || value === 'ai_stylist' ? value : 'ai_stylist'
 }
 
 function slugPart(value: string) {
@@ -120,6 +126,45 @@ async function getUserIdFromRequest(req: NextRequest, authClient: SupabaseClient
   return data.user.id
 }
 
+function isDuplicateRowError(error: { code?: string; message?: string } | null) {
+  const message = error?.message?.toLowerCase() || ''
+  return error?.code === '23505' || message.includes('duplicate key')
+}
+
+async function saveOutfitToCloset(supabase: SupabaseClient, userId: string, outfitRef: string, source: SavedOutfitSource) {
+  const { data: existing, error: lookupError } = await supabase
+    .from('saved_outfits')
+    .select('id, source')
+    .eq('user_id', userId)
+    .eq('outfit_ref', outfitRef)
+    .maybeSingle()
+
+  if (lookupError) throw new Error(`Closet lookup failed: ${lookupError.message}`)
+  if (existing?.id) {
+    if (existing.source !== source) {
+      const { error: updateError } = await supabase
+        .from('saved_outfits')
+        .update({ source })
+        .eq('id', existing.id)
+
+      if (updateError) throw new Error(`Closet source update failed: ${updateError.message}`)
+    }
+    return
+  }
+
+  const { error: savedError } = await supabase
+    .from('saved_outfits')
+    .insert({
+      user_id: userId,
+      outfit_ref: outfitRef,
+      source,
+    })
+
+  if (savedError && !isDuplicateRowError(savedError)) {
+    throw new Error(`Closet save failed: ${savedError.message}`)
+  }
+}
+
 async function saveOneGeneratedOutfit(
   supabase: SupabaseClient,
   userId: string,
@@ -129,6 +174,7 @@ async function saveOneGeneratedOutfit(
     primaryOutfit: GeneratedOutfitVariant
     imageUrl: string | null | undefined
     sourceKey: string
+    closetSource: SavedOutfitSource
     primaryOutfitRef?: string | number | null
   },
 ): Promise<SavedGeneratedOutfit> {
@@ -159,15 +205,7 @@ async function saveOneGeneratedOutfit(
   }
 
   const outfitRef = String(inserted.id)
-  const { error: savedError } = await supabase
-    .from('saved_outfits')
-    .upsert({
-      user_id: userId,
-      outfit_ref: outfitRef,
-      source: 'ai_stylist',
-    }, { onConflict: 'user_id,outfit_ref' })
-
-  if (savedError) throw new Error(`Closet save failed: ${savedError.message}`)
+  await saveOutfitToCloset(supabase, userId, outfitRef, options.closetSource)
 
   return {
     id: outfitRef,
@@ -190,6 +228,8 @@ export async function POST(req: NextRequest) {
 
     const sourceKey = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
     const requestedType = asSaveType(body.type)
+    const closetSource = asSavedOutfitSource(body.source)
+    const closetSourceKey = `${closetSource}_${sourceKey}`
 
     if (requestedType) {
       const primaryOutfit = body.primaryOutfit || body.outfit
@@ -198,7 +238,8 @@ export async function POST(req: NextRequest) {
         type: requestedType,
         primaryOutfit,
         imageUrl,
-        sourceKey: `${sourceKey}_${requestedType}`,
+        sourceKey: `${closetSourceKey}_${requestedType}`,
+        closetSource,
       })
 
       return NextResponse.json({ saved: [saved] })
@@ -209,7 +250,8 @@ export async function POST(req: NextRequest) {
       type: 'primary',
       primaryOutfit: primary,
       imageUrl: body.image_url,
-      sourceKey,
+      sourceKey: closetSourceKey,
+      closetSource,
     })
 
     const saved: SavedGeneratedOutfit[] = [savedPrimary]
@@ -219,7 +261,8 @@ export async function POST(req: NextRequest) {
         type: 'alternative',
         primaryOutfit: primary,
         imageUrl: body.alternative_image_url,
-        sourceKey,
+        sourceKey: closetSourceKey,
+        closetSource,
         primaryOutfitRef: savedPrimary.id,
       }))
     }

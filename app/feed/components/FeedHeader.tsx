@@ -9,6 +9,7 @@ interface FeedHeaderProps {
   onOpenAiStylist: () => void
   onOpenCloset: () => void
   onOpenProfile: () => void
+  onOpenTravelPack?: () => void
 }
 
 export default function FeedHeader({
@@ -18,6 +19,7 @@ export default function FeedHeader({
   onOpenAiStylist,
   onOpenCloset,
   onOpenProfile,
+  onOpenTravelPack,
 }: FeedHeaderProps) {
   const { isAr } = useLocale()
   const profileLabel = `@${displayName}`
@@ -38,6 +40,23 @@ export default function FeedHeader({
           <line x1="10" y1="12" x2="14" y2="12" />
         </svg>
       </button>
+
+      {/* Travel Pack icon — top left (right in RTL) */}
+      {onOpenTravelPack && (
+        <button
+          onClick={onOpenTravelPack}
+          className="cursor-pointer fixed z-50 min-w-[44px] min-h-[44px] flex items-center justify-center text-zinc-600 hover:text-white transition-colors duration-200 active:scale-90"
+          style={{ top: 'max(2rem, env(safe-area-inset-top))', [isAr ? 'right' : 'left']: '1rem' }}
+          aria-label={isAr ? 'حقيبة السفر' : 'Pack for a Trip'}
+        >
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="1" y="8" width="22" height="13" rx="2" ry="2" />
+            <path d="M16 8V6a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" />
+            <line x1="12" y1="13" x2="12" y2="17" />
+            <line x1="10" y1="15" x2="14" y2="15" />
+          </svg>
+        </button>
+      )}
 
       {/* Centred brand title + profile handle */}
       <div

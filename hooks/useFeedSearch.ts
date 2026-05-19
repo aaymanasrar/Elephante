@@ -26,6 +26,7 @@ interface FeedSearchParams {
   userHeight: string
   userSkinTone: string
   userStylePref: string
+  userAvatarUrl?: string
   language?: 'en' | 'ar'
   ready?: boolean
 }
@@ -46,6 +47,7 @@ export function useFeedSearch({
   userHeight,
   userSkinTone,
   userStylePref,
+  userAvatarUrl = '',
   language = 'en',
   ready = true,
 }: FeedSearchParams) {
@@ -83,6 +85,7 @@ export function useFeedSearch({
     userHeight,
     userSkinTone,
     userStylePref,
+    userAvatarUrl,
     initialAiContext: restoredState?.aiContext || null,
     initialChatHistory: restoredState?.chatHistory || [],
     initialCompletedQuery: restoredState?.searchQuery || '',

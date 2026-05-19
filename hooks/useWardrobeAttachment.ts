@@ -15,6 +15,11 @@ export interface WardrobeAttachment {
   confirming: boolean
   image_url: string
   storage_path: string
+  original_image_url?: string
+  original_storage_path?: string
+  image_prettified?: boolean
+  image_ai_edited?: boolean
+  image_provider?: string
   item_name: string
   item_type: string
   pieces: string[]
@@ -38,7 +43,7 @@ export function useWardrobeAttachment(userId: string, onStyleQuery: (query: stri
   const attachFile = async (file: File | null | undefined) => {
     if (!file) return
 
-    if (attachment?.preview) URL.revokeObjectURL(attachment.preview)
+    if (attachment?.preview?.startsWith('blob:')) URL.revokeObjectURL(attachment.preview)
     const preview = URL.createObjectURL(file)
     setAttachment({
       preview,
@@ -83,6 +88,11 @@ export function useWardrobeAttachment(userId: string, onStyleQuery: (query: stri
         confirming: false,
         image_url: data.image_url,
         storage_path: data.storage_path,
+        original_image_url: data.original_image_url,
+        original_storage_path: data.original_storage_path,
+        image_prettified: Boolean(data.image_prettified),
+        image_ai_edited: Boolean(data.image_ai_edited),
+        image_provider: data.image_provider || '',
         item_name: data.item_name,
         item_type: data.item_type,
         pieces: Array.isArray(data.pieces) ? data.pieces : [],
@@ -159,10 +169,10 @@ export function useWardrobeAttachment(userId: string, onStyleQuery: (query: stri
     }
   }
 
-  const clearAttachment = () => {
-    if (attachment?.preview) URL.revokeObjectURL(attachment.preview)
+  const clearAttachment = (options?: { clearSearch?: boolean }) => {
+    if (attachment?.preview?.startsWith('blob:')) URL.revokeObjectURL(attachment.preview)
     setAttachment(null)
-    onClearSearch()
+    if (options?.clearSearch !== false) onClearSearch()
   }
 
   return {

@@ -23,6 +23,7 @@ export interface ExcelOutfit {
   material_shoes?: string | null
   material_notes?: string | null
   brand?: string | null
+  gender?: string | null
 }
 
 export interface DbOutfit {

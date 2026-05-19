@@ -736,7 +736,8 @@ export default function ClosetPage() {
 
   const handleBuildOutfit = () => {
     if (selectedItemIds.size === 0) return
-    router.push(`/outfit-builder?preselect=${Array.from(selectedItemIds).join(',')}`)
+    setSelectMode(false)
+    setSelectedItemIds(new Set())
   }
 
   const fetchWeather = async () => {
@@ -970,7 +971,7 @@ export default function ClosetPage() {
                 className="group cursor-pointer"
                 onClick={() => {
                   if (selectMode) toggleItemSelection(item.id)
-                  else router.push(`/outfit-builder?preselect=${item.id}`)
+                  else toggleItemSelection(item.id)
                 }}
               >
                 <div className={`relative w-full aspect-[3/4] overflow-hidden rounded-xl bg-zinc-900/80 border transition-all duration-300 ${
@@ -1124,12 +1125,6 @@ export default function ClosetPage() {
           <div className="space-y-4 animate-in fade-in slide-in-from-bottom-3 duration-500">
             <div className="flex items-center justify-between gap-2">
               <p className="text-[10px] uppercase tracking-[0.3em] text-zinc-300">{outfitSuggestion.outfit_name || t.todaysLook}</p>
-              <button
-                onClick={() => router.push(`/outfit-builder?preselect=${outfitSuggestion.selected_items.map((i) => i.id).join(',')}`)}
-                className="text-[9px] uppercase tracking-widest text-zinc-500 hover:text-white transition-colors flex-shrink-0"
-              >
-                {isAr ? 'فتح في المنسق ←' : 'Open in Builder →'}
-              </button>
             </div>
             <div className="grid grid-cols-3 gap-2">
               {outfitSuggestion.selected_items.map((item) => (
@@ -1243,10 +1238,7 @@ export default function ClosetPage() {
             key={String(outfit.id || index)}
             className="group cursor-pointer"
             onClick={() => {
-              if (String(outfit.id).startsWith('item_')) {
-                const itemId = String(outfit.id).replace('item_', '')
-                router.push(`/outfit-builder?preselect=${itemId}`)
-              } else {
+              if (!String(outfit.id).startsWith('item_')) {
                 router.push(`/outfit/${outfit.id}?closetSection=${outfitSection}`)
               }
             }}

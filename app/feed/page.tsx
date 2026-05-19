@@ -16,9 +16,10 @@ import { feedTranslations } from '@/data/translations'
 import { useLocale } from '@/lib/locale-context'
 import { searchOutfits } from '@/lib/searchOutfits'
 import { useKeyboardOffset } from '@/hooks/useFeedUi'
+import { writeLastFeedUrl } from '@/hooks/useFeedStatePersistence'
 import { useElephanteData } from '@/hooks/useElephanteData'
 import { useFeedSearch } from '@/hooks/useFeedSearch'
-import { useWardrobeAttachment } from '@/hooks/useWardrobeAttachment'
+import { useWardrobeAttachment, type WardrobeAttachment } from '@/hooks/useWardrobeAttachment'
 import { useRequireUser } from '@/hooks/useRequireUser'
 import { useArabicTranslations } from '@/hooks/useArabicTranslations'
 import { canUseNextImage } from '@/lib/image'
@@ -29,7 +30,7 @@ const AR = '\u0628\u0645\u0627\u0630\u0627 \u0646\u064f\u0644\u0628\u0633\u0643 
 const NL_SIGNALS = ['suggest', 'suggestion', 'recommend', 'recommendation', 'help', 'need', 'want', 'have', 'going', 'date', 'event', 'tonight', 'evening', 'morning', 'special', 'something', 'occasion', 'meeting', 'interview', 'wedding', 'party', 'dinner', 'casual', 'formal', 'office', 'work', 'business', 'weekend', 'summer', 'winter', 'night', 'out', 'smart', 'what', 'which', 'give', 'me', 'feel', 'look', 'wear', 'style', 'fit', 'outfit', 'dress', 'rate']
 const POSSESSION_PREFIXES = ['i have', 'i own', "i've got", 'i got', "i'm wearing", 'wearing my', 'i wear']
 
-function SearchPlaceholder({ active }: { active: boolean }) {
+function SearchPlaceholder({ active, text }: { active: boolean; text?: string }) {
   const { isAr } = useLocale()
 
   if (active) return null
@@ -41,7 +42,7 @@ function SearchPlaceholder({ active }: { active: boolean }) {
         fontFamily: isAr ? 'var(--font-arabic, serif)' : 'inherit',
       }}
     >
-      {isAr ? AR : EN}
+      {text || (isAr ? AR : EN)}
     </span>
   )
 }
@@ -172,8 +173,127 @@ type AttachmentAnalysis = {
   styling_tip?: string
 }
 
-type FeedChatTurn = { role: 'user' | 'assistant'; content: string }
+type FeedChatTurn = {
+  role: 'user' | 'assistant'
+  content: string
+  display?: 'analysis-card'
+  imagePreview?: string
+}
 type AttachmentAnalysisMode = 'inventory' | 'rating'
+type AttachmentVisionMode = AttachmentAnalysisMode | 'question'
+
+type AttachmentChatContext = {
+  imageUrl: string
+  imageLabel: string
+  itemName: string
+  itemType: string
+  pieces: string[]
+  color: string
+  occasion: string
+  details: string
+}
+
+
+function buildCurationQueryFromAttachment(
+  attachment: WardrobeAttachment,
+  isAr: boolean,
+  mode: 'similar' | 'different' = 'similar',
+): string {
+  const parts = [
+    attachment.item_name || attachment.item_type,
+    attachment.color,
+    ...(attachment.pieces || []).slice(0, 3),
+  ].filter((p): p is string => typeof p === 'string' && p.trim().length > 0 && !['none', 'null', 'n/a', 'na'].includes(p.trim().toLowerCase()))
+
+  const desc = parts.join(', ')
+  if (isAr) {
+    return mode === 'similar'
+      ? `اقترح لي إطلالات مشابهة: ${desc}`
+      : `أعد تصميم هذه الإطلالة بأسلوب مختلف: ${desc}`
+  }
+  return mode === 'similar'
+    ? `suggest similar outfits: ${desc}`
+    : `restyle this with a fresh take: ${desc}`
+}
+
+function buildCurationQueryFromAnalysis(
+  analysis: AttachmentAnalysis,
+  isAr: boolean,
+  mode: 'similar' | 'different' = 'similar',
+): string {
+  const parts = [
+    analysis.outfit_name || analysis.style || analysis.vibe,
+    analysis.color_scheme,
+    ...(analysis.pieces || []).slice(0, 3),
+  ].filter((p): p is string => typeof p === 'string' && p.trim().length > 0 && p.toLowerCase() !== 'none')
+
+  const desc = parts.join(', ')
+  if (isAr) {
+    return mode === 'similar'
+      ? `اقترح لي إطلالات مشابهة: ${desc}`
+      : `أعد تصميم هذه الإطلالة بأسلوب مختلف: ${desc}`
+  }
+  return mode === 'similar'
+    ? `suggest similar outfits: ${desc}`
+    : `restyle this with a fresh take: ${desc}`
+}
+
+const ATTACHMENT_FEED_STATE_KEY = 'elephante_attachment_feed_state'
+
+type PersistedAttachmentFeedState = {
+  attachmentAnalysis: AttachmentAnalysis | null
+  attachmentAnalysisMode: AttachmentAnalysisMode | null
+  attachmentChat: AttachmentChatContext | null
+  attachmentSuggestions: string[]
+  attachmentTurns: FeedChatTurn[]
+}
+
+function readPersistedAttachmentFeedState(): PersistedAttachmentFeedState | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const saved = sessionStorage.getItem(ATTACHMENT_FEED_STATE_KEY) || localStorage.getItem(ATTACHMENT_FEED_STATE_KEY)
+    if (!saved) return null
+    return JSON.parse(saved) as PersistedAttachmentFeedState
+  } catch {
+    return null
+  }
+}
+
+function writePersistedAttachmentFeedState(state: PersistedAttachmentFeedState) {
+  try {
+    const serialized = JSON.stringify(state)
+    sessionStorage.setItem(ATTACHMENT_FEED_STATE_KEY, serialized)
+    localStorage.setItem(ATTACHMENT_FEED_STATE_KEY, serialized)
+  } catch {}
+}
+
+function clearPersistedAttachmentFeedState() {
+  try {
+    sessionStorage.removeItem(ATTACHMENT_FEED_STATE_KEY)
+    localStorage.removeItem(ATTACHMENT_FEED_STATE_KEY)
+  } catch {}
+}
+
+function createAttachmentChatContext(attachment: WardrobeAttachment): AttachmentChatContext {
+  const details = [
+    attachment.item_name,
+    attachment.item_type,
+    attachment.color,
+    attachment.occasion,
+    ...(attachment.pieces || []),
+  ].filter(Boolean).join(', ')
+
+  return {
+    imageUrl: attachment.image_url,
+    imageLabel: attachment.item_name || attachment.item_type,
+    itemName: attachment.item_name,
+    itemType: attachment.item_type,
+    pieces: attachment.pieces || [],
+    color: attachment.color || '',
+    occasion: attachment.occasion || '',
+    details,
+  }
+}
 
 function normalizeAnalysisScore(value: unknown) {
   const score = Number(value)
@@ -245,16 +365,20 @@ function FeedContent() {
   const kbOffset = useKeyboardOffset()
 
   // Chat display state
+  const restoredAttachmentState = useState(() => readPersistedAttachmentFeedState())[0]
   const [pendingUserMessage, setPendingUserMessage] = useState('')
   const [chipDisplayMap, setChipDisplayMap] = useState<Record<string, string>>({})
-  const [attachmentAnalysis, setAttachmentAnalysis] = useState<AttachmentAnalysis | null>(null)
-  const [attachmentAnalysisMode, setAttachmentAnalysisMode] = useState<AttachmentAnalysisMode | null>(null)
-  const [attachmentTurns, setAttachmentTurns] = useState<FeedChatTurn[]>([])
+  const [attachmentAnalysis, setAttachmentAnalysis] = useState<AttachmentAnalysis | null>(restoredAttachmentState?.attachmentAnalysis || null)
+  const [attachmentAnalysisMode, setAttachmentAnalysisMode] = useState<AttachmentAnalysisMode | null>(restoredAttachmentState?.attachmentAnalysisMode || null)
+  const [attachmentChat, setAttachmentChat] = useState<AttachmentChatContext | null>(restoredAttachmentState?.attachmentChat || null)
+  const [attachmentSuggestions, setAttachmentSuggestions] = useState<string[]>(restoredAttachmentState?.attachmentSuggestions || [])
+  const [attachmentTurns, setAttachmentTurns] = useState<FeedChatTurn[]>(restoredAttachmentState?.attachmentTurns || [])
   const [isAnalyzingAttachment, setIsAnalyzingAttachment] = useState(false)
   const [isDraggingPhoto, setIsDraggingPhoto] = useState(false)
   const prevHistoryLenRef = useRef(0)
   const dragDepthRef = useRef(0)
   const chatEndRef = useRef<HTMLDivElement>(null)
+  const didAutoCurate = useRef(false)
   const {
     allOutfits,
     allOutfitsRef,
@@ -268,6 +392,7 @@ function FeedContent() {
     userPalettes,
     userSkinTone,
     userStylePref,
+    userAvatarUrl,
     setShowTour,
   } = useElephanteData(() => router.push('/login'))
 
@@ -305,9 +430,17 @@ function FeedContent() {
     userHeight,
     userSkinTone,
     userStylePref,
+    userAvatarUrl,
     language: lang,
     ready: !loading && !authLoading,
   })
+
+  useEffect(() => {
+    if (didAutoCurate.current || loading || authLoading || !userId || initialQuery) return
+    didAutoCurate.current = true
+    setSearchQuery(isAr ? 'اقترح لي إطلالات اليوم' : 'suggest outfits for me today')
+    triggerCuration()
+  }, [loading, authLoading, userId, initialQuery, isAr, setSearchQuery, triggerCuration])
 
   const {
     attachFile,
@@ -320,6 +453,8 @@ function FeedContent() {
     (query) => {
       setAttachmentAnalysis(null)
       setAttachmentAnalysisMode(null)
+      setAttachmentChat(null)
+      setAttachmentSuggestions([])
       setAttachmentTurns([])
       setInputValue(query)
       setSearchQuery(query)
@@ -329,17 +464,68 @@ function FeedContent() {
       setSearchQuery('')
       setAttachmentAnalysis(null)
       setAttachmentAnalysisMode(null)
+      setAttachmentChat(null)
+      setAttachmentSuggestions([])
       setAttachmentTurns([])
       clearActiveSearchState()
     }
   )
 
+  useEffect(() => {
+    writeLastFeedUrl(`${window.location.pathname}${window.location.search}`)
+  }, [attachmentAnalysis, attachmentChat, attachmentTurns.length, generatedOutfit, searchQuery])
+
+  useEffect(() => {
+    if (!attachmentChat && attachmentTurns.length === 0 && !attachmentAnalysis) {
+      clearPersistedAttachmentFeedState()
+      return
+    }
+
+    writePersistedAttachmentFeedState({
+      attachmentAnalysis,
+      attachmentAnalysisMode,
+      attachmentChat,
+      attachmentSuggestions,
+      attachmentTurns,
+    })
+  }, [attachmentAnalysis, attachmentAnalysisMode, attachmentChat, attachmentSuggestions, attachmentTurns])
+
   const attachPhotoFile = useCallback(async (file: File) => {
     setAttachmentAnalysis(null)
     setAttachmentAnalysisMode(null)
+    setAttachmentChat(null)
+    setAttachmentSuggestions([])
     setAttachmentTurns([])
     await attachFile(file)
   }, [attachFile])
+
+  const handleQuickCurate = useCallback((mode: 'similar' | 'different') => {
+    if (!attachment?.image_url || attachment.uploading) return
+    const query = buildCurationQueryFromAttachment(attachment, isAr, mode)
+    setAttachmentAnalysis(null)
+    setAttachmentAnalysisMode(null)
+    setAttachmentChat(null)
+    setAttachmentSuggestions([])
+    setAttachmentTurns([])
+    clearAttachment({ clearSearch: false })
+    setSearchQuery(query)
+    setInputValue('')
+    triggerCuration()
+  }, [attachment, isAr, clearAttachment, setSearchQuery, setInputValue, triggerCuration])
+
+  const handleAnalysisCurate = useCallback((mode: 'similar' | 'different') => {
+    if (!attachmentAnalysis) return
+    const query = buildCurationQueryFromAnalysis(attachmentAnalysis, isAr, mode)
+    setAttachmentAnalysis(null)
+    setAttachmentAnalysisMode(null)
+    setAttachmentChat(null)
+    setAttachmentSuggestions([])
+    setAttachmentTurns([])
+    setSearchQuery(query)
+    setInputValue('')
+    triggerCuration()
+  }, [attachmentAnalysis, isAr, setSearchQuery, setInputValue, triggerCuration])
+
 
   useEffect(() => {
     const firstImageFile = (files: FileList | File[]) => Array.from(files).find((file) => file.type.startsWith('image/')) || null
@@ -405,40 +591,51 @@ function FeedContent() {
     }
   }, [attachPhotoFile])
 
-  const handleAnalyzeAttachment = useCallback(async (userRequest?: string, mode: AttachmentAnalysisMode = 'rating') => {
-    if (!attachment?.image_url || attachment.uploading) return
+  const handleAnalyzeAttachment = useCallback(async (userRequest?: string, mode: AttachmentVisionMode = 'rating') => {
+    const sourceAttachment = attachment?.image_url && !attachment.uploading ? attachment : null
+    const nextAttachmentChat = sourceAttachment ? createAttachmentChatContext(sourceAttachment) : attachmentChat
+    if (!nextAttachmentChat?.imageUrl) return
 
     const prompt = userRequest?.trim()
-    const details = [
-      prompt ? `User request: ${prompt}` : null,
-      attachment.item_name ? `Detected item: ${attachment.item_name}` : null,
-      attachment.item_type ? `Detected type: ${attachment.item_type}` : null,
-      attachment.pieces.length ? `Detected pieces: ${attachment.pieces.join(', ')}` : null,
-      attachment.color ? `Detected color: ${attachment.color}` : null,
-      attachment.occasion ? `Detected occasion: ${attachment.occasion}` : null,
-    ].filter(Boolean).join('\n')
-    const userText = `📎 ${prompt || (isAr ? 'تحليل الإطلالة' : 'Style Check')}`
+    const isQuestion = mode === 'question'
+    if (isQuestion && !prompt) return
+
+    const userText = prompt || (isAr ? 'تحليل الإطلالة' : 'Style Check')
+    const priorTurns = sourceAttachment ? [] : attachmentTurns
+    const userTurn: FeedChatTurn = {
+      role: 'user',
+      content: sourceAttachment ? `📎 ${userText}` : userText,
+      imagePreview: sourceAttachment ? nextAttachmentChat.imageUrl : undefined,
+    }
 
     setIsAnalyzingAttachment(true)
-    setAttachmentAnalysis(null)
-    setAttachmentAnalysisMode(mode)
-    setAttachmentTurns([])
-    setPendingUserMessage(userText)
+    setAttachmentChat(nextAttachmentChat)
+    setAttachmentSuggestions([])
+    setAttachmentAnalysisMode(isQuestion ? null : mode)
+    if (sourceAttachment || !isQuestion) setAttachmentAnalysis(null)
+    setAttachmentTurns([...priorTurns, userTurn])
+    setPendingUserMessage('')
     setInputValue('')
     setSearchQuery('')
     clearActiveSearchState()
-    
-    // Clear attachment AFTER capturing the previewUrl in the userText closure
-    clearAttachment()
+
+    if (sourceAttachment) clearAttachment({ clearSearch: false })
 
     try {
+      const outfitDetails = [
+        nextAttachmentChat.details,
+        prompt ? `User request: ${prompt}` : null,
+      ].filter(Boolean).join('\n')
       const response = await fetch('/api/analyze-outfit-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          image_url: attachment.image_url,
-          image_labels: [attachment.item_type || 'attached outfit'],
-          outfit_details: details,
+          image_url: nextAttachmentChat.imageUrl,
+          image_labels: [nextAttachmentChat.imageLabel],
+          outfit_details: outfitDetails,
+          question: isQuestion ? prompt : undefined,
+          prior_analysis: attachmentAnalysis,
+          prior_turns: priorTurns.map(({ role, content }) => ({ role, content })),
           skin_tone: userSkinTone || 'medium_neutral',
           gender: userGender || undefined,
           body_shape: userBodyShape || undefined,
@@ -451,17 +648,34 @@ function FeedContent() {
       const data = await response.json()
       if (data.error) throw new Error(data.error)
 
+      if (isQuestion) {
+        const answer = typeof data.answer === 'string' && data.answer.trim()
+          ? data.answer.trim()
+          : (isAr ? 'أستطيع مساعدتك في هذه الصورة. اسألني عن التناسق أو الألوان أو كيف نطوّر الإطلالة.' : 'I can help with this photo. Ask me about the balance, colors, or how to improve the look.')
+        setAttachmentSuggestions(Array.isArray(data.suggested_questions) ? data.suggested_questions.filter((item: unknown): item is string => typeof item === 'string' && item.trim().length > 0).slice(0, 3) : [])
+        setAttachmentTurns((previous) => [...previous, { role: 'assistant', content: answer }])
+        return
+      }
+
       const analysis = data.analysis as AttachmentAnalysis
+      const analysisMode = mode
       setAttachmentAnalysis(analysis)
-      setAttachmentAnalysisMode(mode)
-      setAttachmentTurns([
-        { role: 'user', content: userText },
-        { role: 'assistant', content: buildAttachmentAnalysisMessage(analysis, isAr, mode) },
+      setAttachmentAnalysisMode(analysisMode)
+      setAttachmentSuggestions(isAr
+        ? ['كيف أحسّنها؟', 'ما الحذاء الأنسب؟', 'اجعلها أكثر رسمية']
+        : ['How can I improve it?', 'What shoes work best?', 'Make it more formal'])
+      setAttachmentTurns((previous) => [
+        ...previous,
+        {
+          role: 'assistant',
+          content: buildAttachmentAnalysisMessage(analysis, isAr, analysisMode),
+          display: analysisMode === 'rating' ? 'analysis-card' : undefined,
+        },
       ])
     } catch (error) {
       const message = error instanceof Error ? error.message : (isAr ? 'تعذّر تحليل الصورة.' : 'Could not analyze the photo.')
-      setAttachmentTurns([
-        { role: 'user', content: userText },
+      setAttachmentTurns((previous) => [
+        ...previous,
         {
           role: 'assistant',
           content: isAr
@@ -475,6 +689,9 @@ function FeedContent() {
     }
   }, [
     attachment,
+    attachmentAnalysis,
+    attachmentChat,
+    attachmentTurns,
     clearAttachment,
     clearActiveSearchState,
     isAr,
@@ -500,22 +717,28 @@ function FeedContent() {
 
   // Auto-scroll to latest message
   useEffect(() => {
-    if (pendingUserMessage || isThinking || isAnalyzingAttachment || chatHistory.length > 0 || attachmentTurns.length > 0 || attachmentAnalysis) {
+    if (pendingUserMessage || isThinking || isAnalyzingAttachment || chatHistory.length > 0 || attachmentTurns.length > 0 || attachmentAnalysis || attachmentChat) {
       chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
     }
-  }, [attachmentAnalysis, attachmentTurns.length, chatHistory.length, finalBanner, isAnalyzingAttachment, isThinking, pendingUserMessage])
+  }, [attachmentAnalysis, attachmentChat, attachmentTurns.length, chatHistory.length, finalBanner, isAnalyzingAttachment, isThinking, pendingUserMessage])
 
   // Chip tap: show chip label in chat, send full prompt to AI
   const handleChipTap = useCallback((chip: string) => {
     const prompt = buildFollowUpPrompt(chip)
     setAttachmentAnalysis(null)
     setAttachmentAnalysisMode(null)
+    setAttachmentChat(null)
+    setAttachmentSuggestions([])
     setAttachmentTurns([])
     setChipDisplayMap((previous) => ({ ...previous, [prompt]: chip }))
     setPendingUserMessage(chip)
     setInputValue('')
     setSearchQuery(prompt)
   }, [buildFollowUpPrompt, setInputValue, setSearchQuery])
+
+  const handleAttachmentChipTap = useCallback((question: string) => {
+    void handleAnalyzeAttachment(question, 'question')
+  }, [handleAnalyzeAttachment])
 
   const boostedIds = useMemo(() => aiContext?.intent ? getBoostedOutfits(aiContext.intent) : [], [aiContext?.intent])
   const noImageLabel = isAr ? 'لا توجد صورة' : 'No image'
@@ -534,7 +757,7 @@ function FeedContent() {
   }, [genderFiltered, userSkinTone, userPalettes, userBodyShape])
 
   const filteredOutfits: Outfit[] = useMemo(() => {
-    if (!searchQuery) return sortedFeed
+    if (!searchQuery) return []
     if (aiContext?.suggestions?.length) {
       return aiContext.suggestions
         .map((suggestion) => genderFiltered.find((outfit) => String(outfit.id) === String(suggestion.outfit_id)))
@@ -548,9 +771,12 @@ function FeedContent() {
     })
   }, [searchQuery, aiContext, sortedFeed, genderFiltered, boostedIds, userSkinTone, userPalettes, userBodyShape])
 
-  const isAttachmentAnalysisOpen = isAnalyzingAttachment || Boolean(attachmentAnalysis)
+  const isAttachmentAnalysisOpen = isAnalyzingAttachment || attachmentTurns.length > 0 || Boolean(attachmentAnalysis || attachmentChat)
   const isSearchSurfaceOpen = isSearching || isAttachmentAnalysisOpen
-  const visibleChatHistory = attachmentTurns.length > 0 ? attachmentTurns : chatHistory
+  const visibleChatHistory: FeedChatTurn[] = attachmentTurns.length > 0 ? attachmentTurns : chatHistory
+  const attachmentFollowUpChips = attachmentSuggestions.length
+    ? attachmentSuggestions
+    : (isAr ? ['كيف أحسّنها؟', 'ما الحذاء الأنسب؟', 'اجعلها أكثر كاجوال'] : ['How can I improve it?', 'What shoes work best?', 'Make it more casual'])
 
   const translateFeedText = useArabicTranslations([
     ...filteredOutfits.map((outfit) => outfit.style || outfit.aesthetic?.replace(/^(male|female)\s+/i, '') || 'Outfit'),
@@ -588,12 +814,15 @@ function FeedContent() {
           setChipDisplayMap({})
           setAttachmentAnalysis(null)
           setAttachmentAnalysisMode(null)
+          setAttachmentChat(null)
+          setAttachmentSuggestions([])
           setAttachmentTurns([])
           clearActiveSearchState()
         }}
         onOpenAiStylist={() => router.push('/ai-stylist')}
         onOpenCloset={() => router.push('/closet')}
         onOpenProfile={() => router.push('/profile')}
+        onOpenTravelPack={() => router.push('/travel-pack')}
       />
 
       <div
@@ -620,8 +849,7 @@ function FeedContent() {
                 const isAttachmentRatingCard =
                   attachmentTurns.length > 0 &&
                   turn.role === 'assistant' &&
-                  index === visibleChatHistory.length - 1 &&
-                  attachmentAnalysisMode === 'rating' &&
+                  turn.display === 'analysis-card' &&
                   attachmentAnalysis != null
 
                 if (isAttachmentRatingCard) {
@@ -631,7 +859,12 @@ function FeedContent() {
                         <img src="/logo.png" alt="" className="w-9 h-9 object-contain" style={{ filter: 'invert(1)', opacity: 1 }} aria-hidden="true" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <OutfitAnalysisCard analysis={attachmentAnalysis} isAr={isAr} />
+                        <OutfitAnalysisCard
+                          analysis={attachmentAnalysis}
+                          isAr={isAr}
+                          onFindSimilar={() => handleAnalysisCurate('similar')}
+                          onRestyle={() => handleAnalysisCurate('different')}
+                        />
                       </div>
                     </div>
                   )
@@ -652,6 +885,11 @@ function FeedContent() {
                         ? 'bg-zinc-800 text-white rounded-2xl rounded-br-sm'
                         : 'bg-zinc-900/80 border border-zinc-800/60 text-zinc-200 rounded-2xl rounded-bl-sm'
                     }`}>
+                      {turn.imagePreview ? (
+                        <div className="mb-2 overflow-hidden rounded-xl border border-white/10 bg-black/20">
+                          <img src={turn.imagePreview} alt="" className="w-full max-h-44 object-cover object-top" aria-hidden="true" />
+                        </div>
+                      ) : null}
                       {isLatestAssistant ? (
                         <TypewriterText key={displayText} text={displayText} speed={14} />
                       ) : displayText}
@@ -704,6 +942,22 @@ function FeedContent() {
                   ))}
                 </div>
               ) : null}
+
+              {/* Image follow-up chips */}
+              {!isThinking && !isAnalyzingAttachment && attachmentChat && attachmentTurns.length > 0 ? (
+                <div className="ml-8 flex flex-wrap gap-2 animate-in fade-in duration-500" style={{ animationDelay: '350ms', animationFillMode: 'both' }}>
+                  {attachmentFollowUpChips.map((chip) => (
+                    <button
+                      key={chip}
+                      onClick={() => handleAttachmentChipTap(chip)}
+                      className="px-3 py-1.5 rounded-full border border-zinc-800 text-zinc-500 text-[11px] hover:border-zinc-600 hover:text-zinc-300 transition-all duration-200 active:scale-95"
+                    >
+                      {chip}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+
 
               {/* Advice mode curate button */}
               {!isThinking && attachmentTurns.length === 0 && aiContext?.mode === 'advice' && !generatingOutfit && !generatedOutfit ? (
@@ -867,6 +1121,8 @@ function FeedContent() {
         handleAttachment={async (event) => {
           setAttachmentAnalysis(null)
           setAttachmentAnalysisMode(null)
+          setAttachmentChat(null)
+          setAttachmentSuggestions([])
           setAttachmentTurns([])
           await handleAttachment(event)
         }}
@@ -877,11 +1133,14 @@ function FeedContent() {
         keyboardOffset={kbOffset}
         onAnalyzeAttachment={() => handleAnalyzeAttachment(inputValue, 'rating')}
         onRateAttachment={() => handleAnalyzeAttachment(inputValue, 'rating')}
+        onFindSimilar={() => handleQuickCurate('similar')}
+        onRestyle={() => handleQuickCurate('different')}
         onInputChange={(value) => {
           setInputValue(value)
-          if (attachment) return
+          if (attachment || attachmentChat) return
           if (attachmentAnalysis) setAttachmentAnalysis(null)
           if (attachmentAnalysisMode) setAttachmentAnalysisMode(null)
+          if (attachmentSuggestions.length) setAttachmentSuggestions([])
           if (attachmentTurns.length) setAttachmentTurns([])
           if (value === '') {
             setSearchQuery('')
@@ -889,26 +1148,41 @@ function FeedContent() {
             setChipDisplayMap({})
             setAttachmentAnalysis(null)
             setAttachmentAnalysisMode(null)
+            setAttachmentChat(null)
+            setAttachmentSuggestions([])
             setAttachmentTurns([])
             clearActiveSearchState()
           }
         }}
         onSubmit={() => {
           const q = inputValue.trim()
+          if (attachment?.uploading) return
           if (attachment?.image_url && !attachment.uploading) {
-            const mode: AttachmentAnalysisMode = 'rating'
+            const mode: AttachmentVisionMode = q ? 'question' : 'rating'
             void handleAnalyzeAttachment(q, mode)
+            return
+          }
+          if (attachmentChat && attachmentTurns.length > 0) {
+            if (!q) return
+            void handleAnalyzeAttachment(q, 'question')
             return
           }
           if (!q) return
           setAttachmentAnalysis(null)
           setAttachmentAnalysisMode(null)
+          setAttachmentChat(null)
+          setAttachmentSuggestions([])
           setAttachmentTurns([])
           setPendingUserMessage(q)
           setSearchQuery(q)
           setInputValue('')
         }}
-        placeholderOverlay={<SearchPlaceholder active={inputValue.length > 0} />}
+        placeholderOverlay={
+          <SearchPlaceholder
+            active={inputValue.length > 0}
+            text={(attachment || attachmentChat) ? (isAr ? 'اسأل عن الصورة...' : 'Ask about this photo...') : undefined}
+          />
+        }
       />
     </div>
   )

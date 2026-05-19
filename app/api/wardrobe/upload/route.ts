@@ -3,6 +3,10 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { analyzeImageWithFallback, extractJSON } from '@/services/aiProviders'
 import { requireEnv } from '@/lib/env'
 import { rateLimit } from '@/lib/rateLimit'
+import { prettifyWardrobeImage } from '@/lib/wardrobeImage'
+import { extractDominantColors } from '@/lib/colorAnalysis'
+
+export const runtime = 'nodejs'
 
 function getSupabaseClients() {
   const supabaseUrl = requireEnv('NEXT_PUBLIC_SUPABASE_URL', 'the wardrobe upload route')
@@ -21,13 +25,13 @@ const MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 const WARDROBE_PROMPT = `You are a fashion AI. Analyse this clothing image and return ONLY a raw JSON object (no markdown, no code blocks):
 {
   "item_name": "short descriptive name e.g. 'White linen shirt', 'Black slim chinos', 'Chunky white sneakers'",
-  "item_type": "one of: top, bottom, shoes, outerwear, accessory, full outfit",
+  "item_type": "one of: top, bottom, shoes, outerwear, accessory, full outfit, Thobe / Kandura, Bisht, Abaya, Keffiyeh / Ghitra, Agal, Pocket Square, Cufflinks, Dress Watch, Suit, Dress Shirt, Blazer / Sport Coat",
   "pieces": ["every visible garment/accessory as a separate string, e.g. 'white linen shirt', 'black slim trousers', 'silver watch'"],
   "color": "primary colour name e.g. 'White', 'Navy', 'Olive'",
-  "occasion": "one suitable occasion e.g. 'Office', 'Weekend', 'Wedding Guest'",
+  "occasion": "one suitable occasion e.g. 'Office', 'Weekend', 'Wedding Guest', 'Eid Al-Fitr / Eid Al-Adha', 'Ramadan', 'Saudi National Day / UAE National Day', 'Majlis', 'Formal Meeting', 'Friday Prayer'",
   "style_query": "a natural search query Elephante should use e.g. 'outfits to wear with white linen shirt', 'style black slim chinos for smart casual'"
 }
-Be specific about what is visible. If the image shows a full outfit, set item_type to "full outfit", make item_name a short outfit summary, and include every visible clothing item and accessory in pieces: tops, bottoms, shoes, outerwear, bags, hats, belts, watches, jewellery, eyewear, socks, and visible layering. Do not invent hidden items; only include what can be seen.`
+Be specific about what is visible. If multiple images are provided, the first is the original upload and the second may be a cleaned catalog version; prefer the original for accuracy and use the cleaned version only for clarity. If the image shows a full outfit, set item_type to "full outfit", make item_name a short outfit summary, and include every visible clothing item and accessory in pieces: tops, bottoms, shoes, outerwear, bags, hats, belts, watches, jewellery, eyewear, socks, and visible layering. For Gulf/GCC traditional garments: identify Thobe/Kandura (men's full-length robe), Bisht (formal ceremonial cloak), Abaya (women's full-length robe), Keffiyeh/Ghitra (head covering), Agal (black cord for head covering). Do not invent hidden items; only include what can be seen.`
 
 function asString(value: unknown, fallback = '') {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback
@@ -83,6 +87,24 @@ function extensionForImageType(imageType: string) {
   return 'jpg'
 }
 
+async function uploadWardrobeImage(
+  supabase: SupabaseClient,
+  path: string,
+  buffer: Buffer,
+  contentType: string,
+) {
+  const { error } = await supabase.storage
+    .from('wardrobe')
+    .upload(path, buffer, { contentType, upsert: false })
+
+  if (error) {
+    throw new Error(`Storage upload failed: ${error.message}`)
+  }
+
+  const { data: { publicUrl } } = supabase.storage.from('wardrobe').getPublicUrl(path)
+  return publicUrl
+}
+
 function categoryFromItemType(itemType: string) {
   const normalized = itemType.toLowerCase().trim()
   if (normalized === 'bottom') return 'bottoms'
@@ -109,18 +131,29 @@ async function handleAnalyze(request: NextRequest, userId: string, supabase: Sup
   }
 
   const ext = extensionForImageType(imageType)
-  const path = `${userId}/${Date.now()}.${ext}`
+  const timestamp = Date.now()
+  const originalPath = `${userId}/wardrobe/original/${timestamp}.${ext}`
   const buffer = Buffer.from(await file.arrayBuffer())
+  const originalPublicUrl = await uploadWardrobeImage(supabase, originalPath, buffer, imageType)
 
-  const { error: uploadError } = await supabase.storage
-    .from('wardrobe')
-    .upload(path, buffer, { contentType: imageType, upsert: false })
+  let path: string
+  let publicUrl: string
+  let imageAiEdited = false
+  let imageProvider = ''
 
-  if (uploadError) {
-    throw new Error(`Storage upload failed: ${uploadError.message}`)
+  try {
+    const prettified = await prettifyWardrobeImage(buffer, userId)
+    const cleanPath = `${userId}/wardrobe/clean/${timestamp}.${prettified.extension}`
+    publicUrl = await uploadWardrobeImage(supabase, cleanPath, prettified.buffer, prettified.contentType)
+    path = cleanPath
+    imageAiEdited = prettified.aiEdited
+    imageProvider = prettified.provider
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    console.warn('[wardrobe/upload] image prettify failed:', message)
+    await supabase.storage.from('wardrobe').remove([originalPath]).catch(() => null)
+    return NextResponse.json({ error: message }, { status: 422 })
   }
-
-  const { data: { publicUrl } } = supabase.storage.from('wardrobe').getPublicUrl(path)
 
   let itemName = 'Clothing item'
   let itemType = 'top'
@@ -130,7 +163,8 @@ async function handleAnalyze(request: NextRequest, userId: string, supabase: Sup
   let styleQuery = ''
 
   try {
-    const { content } = await analyzeImageWithFallback(publicUrl, WARDROBE_PROMPT)
+    const analysisImages = publicUrl === originalPublicUrl ? [originalPublicUrl] : [originalPublicUrl, publicUrl]
+    const { content } = await analyzeImageWithFallback(analysisImages, WARDROBE_PROMPT)
     const parsed = extractJSON(content)
     itemName = asString(parsed.item_name, itemName)
     itemType = asString(parsed.item_type, itemType)
@@ -142,9 +176,33 @@ async function handleAnalyze(request: NextRequest, userId: string, supabase: Sup
     styleQuery = `style this ${itemType}`
   }
 
+  // Enhance the color field with dominant colors from the uploaded image.
+  // Run with a 5-second timeout so it never blocks the response.
+  if (publicUrl) {
+    try {
+      const colorPromise = extractDominantColors(publicUrl, 5)
+      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 5_000))
+      const dominantColors = await Promise.race([colorPromise, timeoutPromise])
+      if (dominantColors && dominantColors.length > 0 && color.length < 20) {
+        const topNames = dominantColors.slice(0, 3).map((c) => c.name)
+        const combined = color
+          ? [color, ...topNames.filter((n) => n.toLowerCase() !== color.toLowerCase())]
+          : topNames
+        color = combined.slice(0, 3).join(', ')
+      }
+    } catch {
+      // Color enhancement is best-effort — ignore failures
+    }
+  }
+
   return NextResponse.json({
     image_url: publicUrl,
     storage_path: path,
+    original_image_url: originalPublicUrl,
+    original_storage_path: originalPath,
+    image_prettified: true,
+    image_ai_edited: imageAiEdited,
+    image_provider: imageProvider,
     item_name: itemName,
     item_type: itemType,
     pieces,
@@ -157,6 +215,42 @@ async function handleAnalyze(request: NextRequest, userId: string, supabase: Sup
       { id: 'occasion', label: occasion || 'Occasion' },
     ],
   })
+}
+
+async function safeInsertClosetItem(supabase: SupabaseClient, payload: any) {
+  let currentPayload = { ...payload }
+  
+  while (true) {
+    const { data, error } = await supabase
+      .from('closet_items')
+      .insert(currentPayload)
+      .select('id')
+      .single()
+      
+    if (error) {
+      const match = error.message.match(/Could not find the '([^']+)' column/i)
+      if (match && match[1]) {
+        const missingColumn = match[1]
+        console.warn(`[safeInsertClosetItem] Column '${missingColumn}' not in schema cache. Removing and retrying...`)
+        delete currentPayload[missingColumn]
+        continue
+      }
+      
+      if (error.code === '42703') {
+        const colMatch = error.message.match(/column \"([^\"]+)\" of relation/i) || error.message.match(/column \"([^\"]+)\" does not exist/i)
+        if (colMatch && colMatch[1]) {
+          const missingColumn = colMatch[1]
+          console.warn(`[safeInsertClosetItem] Postgres column '${missingColumn}' does not exist. Removing and retrying...`)
+          delete currentPayload[missingColumn]
+          continue
+        }
+      }
+      
+      return { data: null, error }
+    }
+    
+    return { data, error: null }
+  }
 }
 
 async function handleConfirm(request: NextRequest, userId: string, supabase: SupabaseClient) {
@@ -173,21 +267,17 @@ async function handleConfirm(request: NextRequest, userId: string, supabase: Sup
     return NextResponse.json({ error: 'A valid wardrobe upload is required.' }, { status: 400 })
   }
 
-  const { data: saved, error } = await supabase
-    .from('closet_items')
-    .insert({
-      user_id: userId,
-      category: categoryFromItemType(itemType),
-      image_url: imageUrl,
-      storage_path: storagePath,
-      item_name: itemName,
-      item_type: itemType,
-      color,
-      occasion,
-      style_query: styleQuery,
-    })
-    .select('id')
-    .single()
+  const { data: saved, error } = await safeInsertClosetItem(supabase, {
+    user_id: userId,
+    category: categoryFromItemType(itemType),
+    image_url: imageUrl,
+    storage_path: storagePath,
+    item_name: itemName,
+    item_type: itemType,
+    color,
+    occasion,
+    style_query: styleQuery,
+  })
 
   if (error) {
     throw new Error(`Wardrobe save failed: ${error.message}`)

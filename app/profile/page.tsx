@@ -168,6 +168,9 @@ export default function ProfileDashboard() {
   const [savedCount, setSavedCount] = useState(0)
   const [editField, setEditField]       = useState<EditField>(null)
   const [showAccountMenu, setShowAccountMenu] = useState(false)
+  const [avatarUrl, setAvatarUrl] = useState('')
+  const [uploadingAvatar, setUploadingAvatar] = useState(false)
+
   const copy = isAr ? {
     savedItems: 'المحفوظات',
     account: 'الحساب',
@@ -199,12 +202,13 @@ export default function ProfileDashboard() {
 
       const { data: profile } = await supabase
         .from('profiles')
-        .select('id, full_name, username')
+        .select('id, full_name, username, avatar_url')
         .eq('id', user.id)
         .single()
 
       if (profile) {
         setUsername(profile.full_name || profile.username || user.email?.split('@')[0] || 'Style Icon')
+        setAvatarUrl(profile.avatar_url || '')
       }
 
       const { count } = await supabase
@@ -221,6 +225,56 @@ export default function ProfileDashboard() {
   const handleSaved = (field: EditField, newValue: string) => {
     if (field === 'username') setUsername(newValue)
     if (field === 'email')    setUserEmail(newValue)
+  }
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setUploadingAvatar(true)
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('Not authenticated')
+
+      const fileExt = file.name.split('.').pop()
+      const filePath = `avatars/${user.id}-${Date.now()}.${fileExt}`
+
+      const { error: uploadError } = await supabase.storage
+        .from('wardrobe')
+        .upload(filePath, file)
+
+      if (uploadError) throw uploadError
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('wardrobe')
+        .getPublicUrl(filePath)
+
+      setAvatarUrl(publicUrl)
+
+      const { error: dbErr } = await supabase
+        .from('profiles')
+        .update({ avatar_url: publicUrl })
+        .eq('id', user.id)
+
+      if (dbErr) throw dbErr
+    } catch (err: any) {
+      alert(err.message || 'Failed to upload avatar')
+    } finally {
+      setUploadingAvatar(false)
+    }
+  }
+
+  const handleAvatarUrlPaste = async (url: string) => {
+    const trimmed = url.trim()
+    setAvatarUrl(trimmed)
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      await supabase
+        .from('profiles')
+        .update({ avatar_url: trimmed || null })
+        .eq('id', user.id)
+    } catch {}
   }
 
   if (loading) return <LoadingScreen />
@@ -244,14 +298,31 @@ export default function ProfileDashboard() {
         <div className="w-full max-w-sm flex flex-col items-center">
 
           {/* Avatar */}
-          <div className="w-20 h-20 sm:w-24 sm:h-24 bg-zinc-900 border border-zinc-800 rounded-full flex items-center justify-center mb-5 shadow-[0_0_24px_rgba(255,255,255,0.04)]">
-            <span className="text-zinc-300 text-2xl font-light">
-              {userEmail.charAt(0).toUpperCase()}
-            </span>
+          <div className="relative group mb-5">
+            <div className="w-20 h-20 sm:w-24 sm:h-24 bg-zinc-900 border border-zinc-800 rounded-full flex items-center justify-center shadow-[0_0_24px_rgba(255,255,255,0.04)] overflow-hidden">
+              {avatarUrl ? (
+                <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-zinc-300 text-2xl font-light">
+                  {userEmail.charAt(0).toUpperCase()}
+                </span>
+              )}
+            </div>
+            <label className="absolute bottom-0 right-0 bg-white text-black p-2 rounded-full cursor-pointer shadow-lg active:scale-95 transition-transform hover:bg-zinc-100 flex items-center justify-center border border-zinc-200">
+              <input type="file" accept="image/*" className="hidden" onChange={handleAvatarUpload} disabled={uploadingAvatar} />
+              {uploadingAvatar ? (
+                <span className="w-3 h-3 border-2 border-black/30 border-t-black rounded-full animate-spin" />
+              ) : (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                  <circle cx="12" cy="13" r="4"/>
+                </svg>
+              )}
+            </label>
           </div>
 
           <h1 className={`text-base font-light text-white mb-1 ${isAr ? '' : 'tracking-widest'}`}>{username}</h1>
-          <p className={`text-zinc-600 text-[11px] mb-10 ${isAr ? '' : 'tracking-wide'}`}>{userEmail}</p>
+          <p className={`text-zinc-600 text-[11px] mb-8 ${isAr ? '' : 'tracking-wide'}`}>{userEmail}</p>
 
           {/* Stats */}
           <div className="grid grid-cols-2 gap-3 w-full mb-8">
@@ -271,31 +342,38 @@ export default function ProfileDashboard() {
             </button>
           </div>
 
-          {/* Outfit Builder */}
-          <button
-            onClick={() => router.push('/outfit-builder')}
-            className="group w-full rounded-2xl border border-zinc-800/60 overflow-hidden mb-8 relative hover:border-zinc-700 transition-all duration-300 text-left"
-          >
-            <div className="w-full flex items-center justify-center py-8 bg-zinc-950 select-none transition-all duration-500 group-hover:bg-zinc-900/60">
-              <svg width="90" height="160" viewBox="0 0 90 160" fill="none" xmlns="http://www.w3.org/2000/svg" className="transition-transform duration-500 group-hover:scale-105">
-                <ellipse cx="45" cy="16" rx="13" ry="15" fill="#3f3f46"/>
-                <rect x="40" y="29" width="10" height="10" rx="2" fill="#3f3f46"/>
-                <path d="M10 48 Q45 35 80 48 L80 95 Q45 105 10 95 Z" fill="#3f3f46"/>
-                <rect x="28" y="95" width="34" height="35" rx="4" fill="#3f3f46"/>
-                <path d="M20 130 Q45 122 70 130 L66 155 Q45 160 24 155 Z" fill="#3f3f46"/>
-                <rect x="43" y="155" width="4" height="5" fill="#3f3f46"/>
-                <ellipse cx="45" cy="160" rx="18" ry="4" fill="#3f3f46"/>
-              </svg>
+          {/* Custom Avatar Settings Card */}
+          <div className="w-full bg-zinc-900/40 border border-zinc-800/80 rounded-2xl p-5 mb-8 text-left" dir={isAr ? 'rtl' : 'ltr'}>
+            <h3 className={`text-[10px] text-zinc-500 mb-2.5 font-bold ${isAr ? '' : 'uppercase tracking-widest'}`}>
+              {isAr ? 'مجسم العرض الافتراضي (Avatar)' : 'Virtual Try-On Avatar'}
+            </h3>
+            <p className="text-zinc-400 text-xs font-light leading-relaxed mb-4">
+              {isAr 
+                ? 'ارفع صورة رمزية (مثل Memoji بخلفية شفافة) لتجربة الملابس عليها افتراضياً. سيحصل المستخدمون الآخرون على مجسم العرض العادي.' 
+                : 'Upload or paste a stylized avatar (like a transparent iOS Memoji) to see outfits rendered on you. Leave blank for a standard mannequin.'}
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder={isAr ? 'الصق رابط الصورة الرمزية...' : 'Paste avatar image URL...'}
+                value={avatarUrl}
+                onChange={(e) => handleAvatarUrlPaste(e.target.value)}
+                className="flex-1 bg-black/40 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-zinc-700 focus:outline-none focus:border-zinc-700 transition-colors"
+              />
+              {avatarUrl ? (
+                <button
+                  onClick={() => handleAvatarUrlPaste('')}
+                  className="bg-zinc-900 border border-zinc-800 hover:border-red-950 hover:text-red-400 transition-colors px-3 rounded-xl text-zinc-500 flex items-center justify-center"
+                  title="Clear Avatar"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"/>
+                    <line x1="6" y1="6" x2="18" y2="18"/>
+                  </svg>
+                </button>
+              ) : null}
             </div>
-            <div className="absolute inset-0 flex flex-col items-center justify-center px-5 text-center">
-              <span className={`text-[9px] text-zinc-500 mb-2 group-hover:text-zinc-400 transition-colors ${isAr ? '' : 'uppercase tracking-[0.3em]'}`}>{copy.buildEyebrow}</span>
-              <p className="text-white text-sm font-light leading-snug mb-1">{copy.builderTitle}</p>
-              <p className="text-zinc-500 text-[11px] leading-relaxed max-w-[200px] group-hover:text-zinc-400 transition-colors">
-                {copy.builderBody}
-              </p>
-              <span className={`mt-3 text-[9px] text-zinc-700 group-hover:text-zinc-500 transition-colors ${isAr ? '' : 'uppercase tracking-[0.25em]'}`}>{copy.tapOpen}</span>
-            </div>
-          </button>
+          </div>
 
           {/* Actions */}
           <div className="w-full space-y-3 mb-6">

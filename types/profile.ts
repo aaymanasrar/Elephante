@@ -11,4 +11,5 @@ export interface Profile {
   body_shape?: string | null
   height_category?: string | null
   style_preference?: string | null
+  avatar_url?: string | null
 }

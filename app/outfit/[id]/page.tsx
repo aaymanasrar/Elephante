@@ -1,8 +1,8 @@
 'use client'
 
 import Image from 'next/image'
-import { useEffect, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useEffect, useRef, useState } from 'react'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import LoadingScreen from '@/app/components/LoadingScreen'
 import ParticleCanvas from '@/components/ParticleCanvas'
@@ -50,6 +50,17 @@ const outfitCopy = {
     savedToCloset: 'Saved to Closet',
     saveToCloset: 'Save to Closet',
     removeFromCloset: 'Remove from closet',
+    spin360: '360 Garment',
+    spinGenerate: 'Generate 360',
+    spinGenerating: 'Building 360...',
+    spinDrag: 'Drag to rotate',
+    spinExperimental: 'Experimental garment-only spin. Back and side views are inferred.',
+    spinRegenerate: 'Regenerate',
+    spinUnavailable: 'Add outfit pieces before generating a 360 spin.',
+    spinError: 'Could not build the 360 garment spin.',
+    logWear: 'Log Wear',
+    wornTimes: (n: number) => n === 1 ? 'Worn 1 time' : `Worn ${n} times`,
+    lastWorn: 'Last worn',
   },
   ar: {
     archive: 'الأرشيف',
@@ -75,6 +86,17 @@ const outfitCopy = {
     savedToCloset: 'محفوظة في الخزانة',
     saveToCloset: 'حفظ في الخزانة',
     removeFromCloset: 'إزالة من الخزانة',
+    spin360: 'ملابس 360',
+    spinGenerate: 'إنشاء 360',
+    spinGenerating: 'جارٍ بناء 360...',
+    spinDrag: 'اسحب للتدوير',
+    spinExperimental: 'عرض تجريبي للملابس فقط. الجوانب والخلف مستنتجة.',
+    spinRegenerate: 'إعادة الإنشاء',
+    spinUnavailable: 'أضف تفاصيل القطع قبل إنشاء عرض 360.',
+    spinError: 'تعذّر بناء عرض 360 للملابس.',
+    logWear: 'سجّل ارتداء',
+    wornTimes: (n: number) => `ارتديت ${n} مرة`,
+    lastWorn: 'آخر ارتداء',
   },
 } as const
 
@@ -217,6 +239,7 @@ function OutfitHeroImage({ outfit, title }: { outfit: Outfit; title: string }) {
 export default function OutfitDetail() {
   const params = useParams()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { isAr } = useLocale()
   const t = isAr ? outfitCopy.ar : outfitCopy.en
   const { user } = useRequireUser('/login')
@@ -234,6 +257,20 @@ export default function OutfitDetail() {
   const [dataSaved, setDataSaved] = useState(false)
   const [generatingImage, setGeneratingImage] = useState(false)
   const [arabicTranslations, setArabicTranslations] = useState<Record<string, string>>({})
+  const closetSection = searchParams.get('closetSection')
+  const closetBackHref = closetSection === 'personal' || closetSection === 'stylist' || closetSection === 'curated'
+    ? `/closet?section=${closetSection}`
+    : null
+
+  const handleBack = () => {
+    if (closetBackHref) {
+      router.push(closetBackHref)
+      return
+    }
+    router.back()
+  }
+
+
 
   const tr = (value: string | null | undefined) => {
     if (!value) return value || ''
@@ -498,6 +535,8 @@ export default function OutfitDetail() {
     }
   }
 
+
+
   if (loading) return <LoadingScreen />
 
   if (fetchError || !outfit) {
@@ -505,7 +544,7 @@ export default function OutfitDetail() {
       <div className="min-h-screen bg-black flex flex-col items-center justify-center space-y-4 px-6" dir={isAr ? 'rtl' : 'ltr'}>
         <ParticleCanvas />
         <p className={`relative z-10 text-zinc-600 text-[10px] text-center ${isAr ? '' : 'uppercase tracking-widest'}`}>{t.notFound}</p>
-        <button onClick={() => router.back()} className={`relative z-10 text-zinc-500 text-[10px] hover:text-white transition mt-4 ${isAr ? '' : 'uppercase tracking-widest'}`} aria-label={t.goBack}>
+        <button onClick={handleBack} className={`relative z-10 text-zinc-500 text-[10px] hover:text-white transition mt-4 ${isAr ? '' : 'uppercase tracking-widest'}`} aria-label={t.goBack}>
           {isAr ? `${t.goBack} →` : `← ${t.goBack}`}
         </button>
       </div>
@@ -518,7 +557,6 @@ export default function OutfitDetail() {
   const rawStyleLabel = isExcel ? outfit.style_category : outfit.style
   const styleLabel = tr(rawStyleLabel)
   const rawColorScheme = isExcel ? outfit.color_scheme ?? null : null
-  const colorScheme = tr(rawColorScheme) || null
   const rawWhenTo = isExcel ? outfit.when_to_wear : null
   const whenTo = tr(rawWhenTo) || null
   const outfitCode = outfit.outfit_code || null
@@ -573,13 +611,14 @@ export default function OutfitDetail() {
     animationDelay: `${delay}s`,
   })
 
+
   return (
     <div className="min-h-screen bg-black text-white font-sans relative overflow-x-hidden" dir={isAr ? 'rtl' : 'ltr'}>
       <ParticleCanvas />
 
       <nav className="fixed top-0 w-full z-50 px-4 flex items-center justify-between bg-gradient-to-b from-black/80 to-transparent" style={{ paddingTop: 'max(1.25rem, env(safe-area-inset-top))', paddingBottom: '1rem', animation: 'fadeDown 0.5s cubic-bezier(0.4,0,0.2,1) both' }}>
         <button
-          onClick={() => router.back()}
+          onClick={handleBack}
           className="cursor-pointer text-zinc-500 hover:text-white transition-colors duration-200 min-h-[44px] min-w-[44px] flex items-center gap-1.5 active:scale-90"
           aria-label={t.goBack}
         >
@@ -780,29 +819,31 @@ export default function OutfitDetail() {
       </div>
 
       <div className="fixed bottom-0 left-0 right-0 z-40 px-5 pt-8 bg-gradient-to-t from-black via-black/95 to-transparent" style={{ paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom))' }}>
-        <button
-          onClick={handleSave}
-          disabled={isSaving}
-          className={`cursor-pointer w-full max-w-lg mx-auto flex items-center justify-center gap-2.5 py-4 text-[10px] font-bold transition-all duration-300 rounded-2xl active:scale-[0.97] ${isAr ? '' : 'uppercase tracking-[0.4em]'} ${
-            saved
-              ? 'bg-transparent border border-zinc-800 text-zinc-500 hover:border-red-900/50 hover:text-red-400'
-              : 'bg-white text-black hover:bg-zinc-100'
-          }`}
-          aria-label={saved ? t.removeFromCloset : t.saveToCloset}
-        >
-          {isSaving ? (
-            <span className="w-3.5 h-3.5 border-2 border-current/30 border-t-current rounded-full animate-spin" />
-          ) : saved ? (
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-              <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-            </svg>
-          ) : (
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-            </svg>
-          )}
-          {isSaving ? t.processing : saved ? t.savedToCloset : t.saveToCloset}
-        </button>
+        <div className={`max-w-lg mx-auto flex items-center gap-3 ${isAr ? 'flex-row-reverse' : ''}`}>
+          <button
+            onClick={handleSave}
+            disabled={isSaving}
+            className={`cursor-pointer flex-1 flex items-center justify-center gap-2.5 py-4 text-[10px] font-bold transition-all duration-300 rounded-2xl active:scale-[0.97] ${isAr ? '' : 'uppercase tracking-[0.4em]'} ${
+              saved
+                ? 'bg-transparent border border-zinc-800 text-zinc-500 hover:border-red-900/50 hover:text-red-400'
+                : 'bg-white text-black hover:bg-zinc-100'
+            }`}
+            aria-label={saved ? t.removeFromCloset : t.saveToCloset}
+          >
+            {isSaving ? (
+              <span className="w-3.5 h-3.5 border-2 border-current/30 border-t-current rounded-full animate-spin" />
+            ) : saved ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+              </svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+              </svg>
+            )}
+            {isSaving ? t.processing : saved ? t.savedToCloset : t.saveToCloset}
+          </button>
+        </div>
       </div>
 
       <style jsx>{`

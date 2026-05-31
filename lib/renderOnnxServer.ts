@@ -51,12 +51,13 @@ export async function generateRenderOnnxImage(prompt: string): Promise<{ dataUrl
     )
   }
 
-  const json = (await response.json()) as { b64?: string; image?: string; dataUrl?: string }
+  const json = (await response.json()) as { b64?: string; image?: string; dataUrl?: string; image_b64?: string }
 
   const b64 =
     json.dataUrl?.replace(/^data:image\/\w+;base64,/, '') ??
     json.b64 ??
-    json.image
+    json.image ??
+    json.image_b64
 
   if (!b64) {
     throw new Error('[render-onnx] /generate response missing base64 image data')

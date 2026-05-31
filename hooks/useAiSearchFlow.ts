@@ -1,35 +1,52 @@
 'use client'
 
 import type { MutableRefObject } from 'react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { searchOutfits } from '@/lib/searchOutfits'
-import { requestOutfitGeneration, requestOutfitSearch } from '@/services/feedSearchApi'
+import { requestOutfitGeneration, requestOutfitSearch, type WeatherContext } from '@/services/feedSearchApi'
 import { insertGeneratedOutfitBatch } from '@/services/outfitService'
-import type { GeneratedOutfitResult, Outfit } from '@/types/outfit'
+import type { GeneratedOutfitResult } from '@/types/outfit'
 
-type Suggestion = { outfit_id: string; reason: string }
 type BannerColor = { hex: string; name: string }
 type ChatTurn = { role: 'user' | 'assistant'; content: string }
 type GeneratedOutfit = GeneratedOutfitResult | null
+
+export type OutfitCardPieces = {
+  top: string
+  bottom: string
+  shoes: string
+  accessories?: string | null
+  outerwear?: string | null
+}
+
+export type OutfitCard = {
+  outfit_name: string
+  style: string
+  occasion: string
+  vibe: string
+  color_scheme: string
+  key_colors: string[]
+  pieces: OutfitCardPieces
+  why_it_works: string
+  styling_tip: string
+  cultural_note?: string | null
+}
 
 export interface AiContext {
   mode?: string
   intent: string
   response: string
   vibe: string
-  suggestions: Suggestion[]
+  suggestions: Array<{ outfit_id: string; reason: string }>
   colors?: BannerColor[]
   needs_clarification?: boolean
   outfit_query?: string
+  outfit_cards?: OutfitCard[]
 }
 
 interface AiSearchFlowParams {
-  allOutfits: Outfit[]
-  allOutfitsRef: MutableRefObject<Outfit[]>
   curateTriggered: boolean
   displayName: string
-  getOutfitGender: (outfit: Outfit) => 'male' | 'female' | 'unisex'
   isNaturalQuery: (query: string) => boolean
   searchQuery: string
   userBodyShape: string
@@ -38,6 +55,7 @@ interface AiSearchFlowParams {
   userSkinTone: string
   userStylePref: string
   userAvatarUrl?: string
+  weather?: WeatherContext | null
   initialAiContext?: AiContext | null
   initialChatHistory?: ChatTurn[]
   initialCompletedQuery?: string
@@ -49,11 +67,8 @@ interface AiSearchFlowParams {
 }
 
 export function useAiSearchFlow({
-  allOutfits,
-  allOutfitsRef,
   curateTriggered,
   displayName,
-  getOutfitGender,
   isNaturalQuery,
   searchQuery,
   userBodyShape,
@@ -62,6 +77,7 @@ export function useAiSearchFlow({
   userSkinTone,
   userStylePref,
   userAvatarUrl = '',
+  weather = null,
   initialAiContext = null,
   initialChatHistory = [],
   initialCompletedQuery = '',
@@ -75,12 +91,9 @@ export function useAiSearchFlow({
   const [aiStatus, setAiStatus] = useState('Reading the room...')
   const isAr = language === 'ar'
   const statusCopy = {
-    searching: isAr ? 'جارٍ البحث في الأرشيف...' : 'Searching archive...',
+    searching: isAr ? 'جارٍ التفكير في إطلالتك...' : 'Thinking about your look...',
     curating: isAr ? 'جارٍ تنسيق الإطلالة...' : 'Curating for you...',
     fallbackBanner: isAr ? 'هذه الإطلالة التي نسّقتها لك.' : "Here's what I put together for you.",
-    clarify: isAr
-      ? 'قطعة جميلة نقدر ننسقها. ما المناسبة؟ رسمي، كاجوال، أو سهرة؟'
-      : 'Great piece to work with! What are you dressing for — formal, casual, a night out?',
   }
   const [aiContext, setAiContext] = useState<AiContext | null>(initialAiContext)
   const [finalBanner, setFinalBanner] = useState<{ text: string; vibe: string; colors?: BannerColor[] } | null>(initialFinalBanner)
@@ -91,38 +104,17 @@ export function useAiSearchFlow({
   const generatedIdsRef = useRef<{ primary?: string; alternative?: string }>(initialGeneratedIds)
   const chatHistoryRef = useRef<ChatTurn[]>([])
   const activeQueryRef = useRef(initialCompletedQuery)
+  const activeWeatherKeyRef = useRef('')
   const completedQueryRef = useRef(initialCompletedQuery)
   const lastGeneratedForRef = useRef('')
-  const serializedOutfits = useMemo(
-    () =>
-      allOutfits.map((outfit) => ({
-        id: outfit.id,
-        outfit_code: outfit.outfit_code,
-        style: outfit.style_category || outfit.style,
-        occasion: outfit.occasions || outfit.occasion,
-        aesthetic: outfit.aesthetic,
-        top: outfit.top_wear || outfit.top,
-        bottom: outfit.bottom_wear,
-        shoes: outfit.shoes,
-        accessories: outfit.accessories,
-        outerwear: outfit.outerwear,
-        when_to_wear: outfit.when_to_wear,
-        color_scheme: outfit.color_scheme,
-        outfit_details: outfit.outfit_details,
-        pieces: outfit.pieces,
-        colors: outfit.colors || outfit.hex_colors,
-        image_url: outfit.image_url,
-      })),
-    [allOutfits]
-  )
 
-  useEffect(() => {
-    chatHistoryRef.current = chatHistory
-  }, [chatHistory])
+  const weatherKey = (() => {
+    if (!weather?.city || weather.temperature_c == null || !weather.condition) return ''
+    return `${weather.city}|${Math.round(Number(weather.temperature_c))}|${weather.condition}`
+  })()
 
-  useEffect(() => {
-    generatedIdsRef.current = generatedIds
-  }, [generatedIds])
+  useEffect(() => { chatHistoryRef.current = chatHistory }, [chatHistory])
+  useEffect(() => { generatedIdsRef.current = generatedIds }, [generatedIds])
 
   useEffect(() => {
     const query = searchQuery.trim()
@@ -158,21 +150,14 @@ export function useAiSearchFlow({
       setFinalBanner(null)
     }
 
+    // Already completed this query — don't re-run (weather change alone doesn't re-trigger)
     if (!isNewQuery && completedQueryRef.current === query && !curateTriggered) {
+      activeWeatherKeyRef.current = weatherKey
       setIsThinking(false)
       setGeneratingOutfit(false)
       return
     }
 
-    if (!isNaturalQuery(query) && searchOutfits(allOutfitsRef.current, query).length > 0) {
-      setAiContext(null)
-      setChatHistory([])
-      setAiStatus(statusCopy.searching)
-      const timer = setTimeout(() => {
-        if (activeQueryRef.current === query) setIsThinking(false)
-      }, 600)
-      return () => { cancelled = true; clearTimeout(timer) }
-    }
     const controller = new AbortController()
     setIsThinking(true)
     setAiStatus(statusCopy.searching)
@@ -180,7 +165,6 @@ export function useAiSearchFlow({
 
     const timer = setTimeout(async () => {
       if (!isActiveQuery()) return
-
       setAiStatus(statusCopy.curating)
 
       try {
@@ -188,31 +172,73 @@ export function useAiSearchFlow({
           chatHistory: chatHistoryRef.current,
           displayName,
           query,
-          serializedOutfits,
           userBodyShape,
           userGender,
           userHeight,
           userSkinTone,
           userStylePref,
           language,
+          weather,
         }, controller.signal)
 
         if (!isActiveQuery()) return
 
-        const context = data.response ? data : { mode: 'curation', intent: query, response: '', vibe: '', suggestions: [] }
+        // ── Cards mode: outfit cards returned directly, no image generation needed ──
+        if (data.mode === 'cards' && Array.isArray(data.cards) && data.cards.length > 0) {
+          const context: AiContext = {
+            mode: 'cards',
+            intent: data.intent || query,
+            response: data.response || '',
+            vibe: data.vibe || '',
+            suggestions: [],
+            outfit_cards: data.cards,
+          }
+          setAiContext(context)
+          if (data.response) {
+            setChatHistory((prev) => [
+              ...prev,
+              { role: 'user', content: query },
+              { role: 'assistant', content: data.response },
+            ])
+            setFinalBanner({ text: data.response, vibe: data.vibe || '' })
+          }
+          completedQueryRef.current = query
+          setIsThinking(false)
+          return
+        }
+
+        // ── Advice mode: styling knowledge, no outfit generation unless user triggers it ──
+        if (data.mode === 'advice') {
+          const context: AiContext = {
+            mode: 'advice',
+            intent: data.intent || query,
+            response: data.response || '',
+            vibe: '',
+            suggestions: [],
+            colors: data.colors,
+          }
+          setAiContext(context)
+          if (data.response) {
+            setChatHistory((prev) => [
+              ...prev,
+              { role: 'user', content: query },
+              { role: 'assistant', content: data.response },
+            ])
+            setFinalBanner({ text: data.response, vibe: '', colors: data.colors || [] })
+          }
+          completedQueryRef.current = query
+          setIsThinking(false)
+          return
+        }
+
+        // ── Humor mode: off-topic redirect → generate a single outfit image ──
+        // Any other fallback (mode: 'curation') just shows the response text, no auto-generation.
+        const context: AiContext = data.response
+          ? data
+          : { mode: 'curation', intent: query, response: '', vibe: '', suggestions: [] }
+
         if (!isActiveQuery()) return
         setAiContext(context)
-
-        if (context.mode === 'advice') {
-          if (!isActiveQuery()) return
-          setFinalBanner({ text: context.response, vibe: '', colors: context.colors || [] })
-        } else if (context.mode === 'humor' && context.response) {
-          if (!isActiveQuery()) return
-          setFinalBanner({ text: context.response, vibe: context.vibe || '' })
-        } else if (context.suggestions?.length && context.response) {
-          if (!isActiveQuery()) return
-          setFinalBanner({ text: context.response, vibe: context.vibe || '' })
-        }
 
         if (context.response) {
           if (!isActiveQuery()) return
@@ -221,44 +247,24 @@ export function useAiSearchFlow({
             { role: 'user', content: query },
             { role: 'assistant', content: context.response },
           ])
+          setFinalBanner({ text: context.response, vibe: context.vibe || '', colors: context.colors })
         }
 
-        const resolved = (context.suggestions || []).filter((suggestion: Suggestion) => {
-          const outfit = allOutfitsRef.current.find((item) => String(item.id) === String(suggestion.outfit_id))
-          if (!outfit) return false
-          const outfitGender = getOutfitGender(outfit)
-          return outfitGender === 'unisex' || outfitGender === userGender
-        })
-
-        if (resolved.length > 0 || (context.mode === 'advice' && !curateTriggered) || lastGeneratedForRef.current === query) {
+        // Only auto-generate outfit image for humor/off-topic redirects
+        if (context.mode !== 'humor') {
           completedQueryRef.current = query
           setIsThinking(false)
           return
         }
 
-        // Don't generate when the query is ambiguous — user owns an item but hasn't
-        // specified occasion or style. Show clarification chips instead.
-        const OCCASION_SIGNALS = ['wedding', 'office', 'work', 'formal', 'casual', 'party', 'date', 'interview', 'dinner', 'night out', 'night', 'beach', 'gym', 'sport', 'summer', 'winter', 'meeting', 'event', 'festival', 'travel', 'smart', 'weekend', 'outdoor']
-        const isPossessionQuery = /^(i have|i own|i('ve| ve) got|i got|i'?m wearing|wearing my|i wear)\b/i.test(query.trim())
-        const hasOccasionContext = OCCASION_SIGNALS.some((sig) => query.toLowerCase().includes(sig))
-
-        if (isPossessionQuery && !hasOccasionContext) {
-          setAiContext({ ...context, needs_clarification: true })
-          // If suggestions were empty, finalBanner wasn't set yet — set a clarification banner
-          const bannerAlreadySet = Boolean(context.suggestions?.length && context.response)
-          if (!bannerAlreadySet) {
-            const owned = query.replace(/^(i have|i own|i('ve| ve) got|i got|i'?m wearing|wearing my|i wear)\s+/i, '').trim()
-            setFinalBanner({
-              text: context.response || statusCopy.clarify,
-              vibe: context.vibe || owned,
-            })
-          }
+        const generationKey = weatherKey ? `${query}|weather:${weatherKey}` : query
+        if (lastGeneratedForRef.current === generationKey) {
           completedQueryRef.current = query
           setIsThinking(false)
           return
         }
 
-        lastGeneratedForRef.current = query
+        lastGeneratedForRef.current = generationKey
         setIsThinking(false)
         setGeneratingOutfit(true)
 
@@ -275,13 +281,16 @@ export function useAiSearchFlow({
           userStylePref,
           avatar_url: userAvatarUrl,
           language,
+          weather,
         }, controller.signal)
 
         if (!isActiveQuery() || !generation.outfit) return
 
         setGeneratedOutfit(generation)
         completedQueryRef.current = query
-        const bannerText = generation.outfit.skin_tone_analysis || generation.outfit.pro_tip || ''
+        const bannerText = weather
+          ? (generation.outfit.when_to_wear || generation.outfit.outfit_details || generation.outfit.skin_tone_analysis || generation.outfit.pro_tip || '')
+          : (generation.outfit.skin_tone_analysis || generation.outfit.pro_tip || '')
         if (!isActiveQuery()) return
         setFinalBanner({ text: bannerText || statusCopy.fallbackBanner, vibe: generation.outfit.style || '' })
 
@@ -329,25 +338,19 @@ export function useAiSearchFlow({
       controller.abort(new DOMException('Search cancelled', 'AbortError'))
     }
   }, [
-    allOutfits,
-    allOutfitsRef,
     curateTriggered,
     displayName,
-    getOutfitGender,
-    isNaturalQuery,
+    language,
+    ready,
     searchQuery,
-    serializedOutfits,
+    userAvatarUrl,
     userBodyShape,
     userGender,
     userHeight,
     userSkinTone,
     userStylePref,
-    language,
-    ready,
-    statusCopy.searching,
-    statusCopy.curating,
-    statusCopy.clarify,
-    statusCopy.fallbackBanner,
+    weather,
+    weatherKey,
   ])
 
   return {

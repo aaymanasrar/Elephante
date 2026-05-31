@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { analyzeImageWithFallback, extractJSON } from '@/services/aiProviders'
+import { buildVisionUnavailableCopy } from '@/lib/stylistFallback'
 
 interface AnalysisPayload {
   outfit_name: string
@@ -191,7 +192,8 @@ function normalizeFollowUp(parsed: Record<string, unknown>, fallbackText: string
 }
 
 function normalizeAnalysis(parsed: Record<string, unknown>, fallbackText: string, skinTone: string, mode: AnalysisMode): AnalysisPayload {
-  const overallFallback = compactModelText(fallbackText) || 'The outfit has been reviewed for color harmony, proportion, and overall cohesion.'
+  const fallbackLooksLikeJson = /^\s*[{[]/.test(fallbackText) || fallbackText.includes('"outfit_name"') || fallbackText.includes('"why_it_works"')
+  const overallFallback = (fallbackLooksLikeJson ? '' : compactModelText(fallbackText)) || 'The outfit has been reviewed for color harmony, proportion, and overall cohesion.'
   const limitedSkinTone = skinTone
     ? `For ${skinTone.replace(/_/g, ' ')}, the palette should be judged by contrast, warmth, and whether the colors brighten the complexion.`
     : 'Skin-tone feedback is limited because no skin tone was provided.'
@@ -285,7 +287,31 @@ export async function POST(req: NextRequest) {
       prompt += `\n\nMultiple outfit images are provided in this order: ${labels}. Consider them together as one outfit.`
     }
 
-    const { content } = await analyzeImageWithFallback(imageUrls, prompt)
+    let content = ''
+    try {
+      const response = await analyzeImageWithFallback(imageUrls, prompt)
+      content = response.content
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      console.warn('[analyze-outfit-image] vision fallback:', message)
+
+      const fallback = buildVisionUnavailableCopy(language, outfitDetails, question)
+      if (mode === 'question') {
+        return NextResponse.json({
+          answer: fallback,
+          suggested_questions: language === 'ar'
+            ? ['كيف أحسّنها؟', 'ما الحذاء الأنسب؟', 'اجعلها أكثر رسمية']
+            : ['How can I improve it?', 'What shoes work best?', 'Make it more formal'],
+          mode,
+        })
+      }
+
+      return NextResponse.json({
+        analysis: normalizeAnalysis({}, fallback, skinTone, mode),
+        mode,
+      })
+    }
+
     const parsed = extractJSON(content) as Record<string, unknown>
     if (mode === 'question') {
       const followUp = normalizeFollowUp(parsed, content, language)

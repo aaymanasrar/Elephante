@@ -1,6 +1,7 @@
 'use client'
 
 import { useLocale } from '@/lib/locale-context'
+import Logo from '@/components/Logo'
 
 interface FeedHeaderProps {
   displayName: string
@@ -72,25 +73,20 @@ export default function FeedHeader({
         <button
           id="tour-ai-stylist"
           onClick={isSearching ? onGoHome : onOpenAiStylist}
-          className="cursor-pointer pointer-events-auto font-bold uppercase text-zinc-500 hover:text-white transition-all duration-300 active:scale-95"
+          className="cursor-pointer pointer-events-auto flex items-center justify-center transition-all duration-300 active:scale-95 text-zinc-500 hover:text-white"
           aria-label={isSearching ? 'Back to home feed' : 'Open AI Stylist'}
-          dir="ltr"
-          translate="no"
           style={{
-            letterSpacing: isSearching ? '0.3em' : '0.4em',
-            fontSize: isSearching ? '11px' : '15px',
-            fontFamily: 'var(--font-display, inherit)',
-            unicodeBidi: 'isolate',
-            transition: 'font-size 500ms cubic-bezier(0.4,0,0.2,1), letter-spacing 500ms cubic-bezier(0.4,0,0.2,1), color 200ms',
+            transform: isSearching ? 'scale(0.85)' : 'scale(1)',
+            transition: 'transform 500ms cubic-bezier(0.4,0,0.2,1), color 300ms',
           }}
         >
-          Elephante AI
+          <Logo size={isSearching ? 56 : 96} className="transition-all duration-500" />
         </button>
 
         <button
           id="tour-profile"
           onClick={onOpenProfile}
-          className="cursor-pointer group pointer-events-auto flex flex-col items-center mt-3 transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)] active:scale-95"
+          className="cursor-pointer group pointer-events-auto flex flex-col items-center mt-2 transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)] active:scale-95"
           style={{
             opacity: isSearching ? 0 : 1,
             transform: isSearching ? 'scale(0.95)' : 'scale(1)',

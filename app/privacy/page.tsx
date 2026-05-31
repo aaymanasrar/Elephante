@@ -70,7 +70,7 @@ const SECTIONS = [
 ]
 
 export default function PrivacyPage() {
-  const { lang, isAr } = useLocale()
+  const { isAr } = useLocale()
 
   return (
     <main

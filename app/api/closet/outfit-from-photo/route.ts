@@ -321,6 +321,7 @@ export async function POST(req: NextRequest) {
           itemType: spec.item_type,
           itemName: spec.item_name,
           subjectHint: spec.subjectHint,
+          requireSubjectIsolation: true,
         })
         const url = await uploadClosetImportImage(
           serviceClient, userId, result.buffer, result.contentType,

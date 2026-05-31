@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { chatWithFallback, extractJSON } from '@/services/aiProviders'
 import { rateLimit } from '@/lib/rateLimit'
 import { generateMannequinOutfitImage, seedFromString } from '@/lib/mannequinImage'
+import { buildLocalGeneratedOutfit } from '@/lib/stylistFallback'
 
 export const maxDuration = 300
 
@@ -82,9 +83,47 @@ interface GeneratedOutfitForImage {
   color_scheme?: string | null
   key_colors?: string[] | null
   when_to_wear?: string | null
+  outfit_details?: string | null
+  skin_tone_analysis?: string | null
+  pro_tip?: string | null
   gender?: string | null
   alternative?: GeneratedOutfitForImage | null
   skin_tone_match?: boolean
+}
+
+type WeatherPayload = {
+  city?: unknown
+  temperature_c?: unknown
+  condition?: unknown
+}
+
+function buildWeatherNote(weather: WeatherPayload | null | undefined, language?: string) {
+  const city = typeof weather?.city === 'string' ? weather.city.trim() : ''
+  const condition = typeof weather?.condition === 'string' ? weather.condition.trim() : ''
+  const temperature = Number(weather?.temperature_c)
+  if (!city || !condition || !Number.isFinite(temperature)) return ''
+
+  const roundedTemp = Math.round(temperature)
+  if (language === 'ar') {
+    return `حسب طقس اليوم في ${city} (${roundedTemp}°C، ${condition})، هذه الإطلالة مناسبة للظروف الحالية.`
+  }
+
+  return `According to today's weather in ${city} (${roundedTemp}°C, ${condition}), this outfit is built for the current conditions.`
+}
+
+function appendWeatherNote(value: string | null | undefined, note: string) {
+  if (!note) return value || null
+  if (!value) return note
+
+  const lowerValue = value.toLowerCase()
+  if (lowerValue.includes("according to today's weather") || value.includes('حسب طقس اليوم')) return value
+  return `${note} ${value}`
+}
+
+function applyWeatherNote(outfit: GeneratedOutfitForImage | null | undefined, note: string) {
+  if (!outfit || !note) return
+  outfit.when_to_wear = appendWeatherNote(outfit.when_to_wear, note)
+  outfit.outfit_details = appendWeatherNote(outfit.outfit_details, note)
 }
 
 export async function POST(req: NextRequest) {
@@ -104,24 +143,38 @@ export async function POST(req: NextRequest) {
       style_pref && `Style preference: ${style_pref}`,
     ].filter(Boolean).join('\n')
 
+    const weatherNote = buildWeatherNote(weather, language)
     const weatherContext = weather?.city && weather?.temperature_c != null && weather?.condition
-      ? `\n\nWEATHER CONTEXT: ${weather.city} is currently ${weather.temperature_c}°C and ${weather.condition}. Factor this into your outfit — choose appropriate fabrics, layers, and pieces for this weather. Do not mention the weather explicitly in outfit_name, but reflect it in material and layering choices.`
+      ? `\n\nWEATHER CONTEXT: ${weather.city} is currently ${weather.temperature_c}°C and ${weather.condition}. Factor this into your outfit — choose appropriate fabrics, layers, and pieces for this weather. Do not mention the weather explicitly in outfit_name. Include this weather note in "when_to_wear" or "outfit_details": "${weatherNote}".`
       : ''
 
-    // 1. Generate outfit details via Groq (or fallback)
-    const result = await chatWithFallback(
-      [
-        { role: 'system', content: SYSTEM },
-        {
-          role: 'user',
-          content: `User request: "${query}"\n\nUSER PROFILE:\n${userProfile}${weatherContext}\n\nBuild an outfit that directly answers the request AND flatters this user's body shape and skin tone. Write all user-facing outfit text in ${responseLanguage}. Return ONLY raw JSON starting with {`,
-        },
-      ],
-      { maxTokens: 1000, temperature: 0.75 },
-    )
+    // 1. Generate outfit details via the provider chain; fall back locally if the
+    // model is unavailable or returns unusable JSON.
+    let outfit: GeneratedOutfitForImage
+    try {
+      const result = await chatWithFallback(
+        [
+          { role: 'system', content: SYSTEM },
+          {
+            role: 'user',
+            content: `User request: "${query}"\n\nUSER PROFILE:\n${userProfile}${weatherContext}\n\nBuild an outfit that directly answers the request AND flatters this user's body shape and skin tone. Write all user-facing outfit text in ${responseLanguage}. Return ONLY raw JSON starting with {`,
+          },
+        ],
+        { maxTokens: 1000, temperature: 0.75 },
+      )
 
-    const outfit = extractJSON(result.content) as GeneratedOutfitForImage
+      const parsed = extractJSON(result.content) as GeneratedOutfitForImage
+      outfit = parsed?.top_wear && parsed?.bottom_wear && parsed?.shoes
+        ? parsed
+        : buildLocalGeneratedOutfit({ query, gender, skinTone: skin_tone, bodyShape: body_shape, stylePref: style_pref, language, weather })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      console.warn('[outfit-generate] local stylist fallback:', message)
+      outfit = buildLocalGeneratedOutfit({ query, gender, skinTone: skin_tone, bodyShape: body_shape, stylePref: style_pref, language, weather })
+    }
     outfit.gender = gender || 'male'
+    applyWeatherNote(outfit, weatherNote)
+    applyWeatherNote(outfit.alternative, weatherNote)
 
     // 2. Build image URLs on a clean mannequin
     const primaryImage = await generateMannequinOutfitImage(outfit, seedFromString(query), outfit.gender)

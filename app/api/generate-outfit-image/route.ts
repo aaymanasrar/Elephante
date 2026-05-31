@@ -6,6 +6,7 @@ import { generateMagnificMysticImage, hasMagnificImageConfig } from '@/lib/magni
 import { buildCatalogMannequinImagePrompt } from '@/lib/outfitImagePrompt'
 import { generateSkyworkImage, hasSkyworkImageConfig } from '@/lib/skyworkImage'
 import { generateFalImage, hasFalImageConfig } from '@/lib/falImage'
+import { generateRenderOnnxImage, hasRenderOnnxConfig } from '@/lib/renderOnnxServer'
 import type { Outfit } from '@/types/outfit'
 
 export const maxDuration = 300
@@ -195,7 +196,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ image: finalImg, provider, ...extra })
     }
 
-    // 1. FAL.ai — FLUX Pro v1.1, photorealistic fashion quality
+    // 1. Render ONNX (local/self-hosted) — free-first
+    if (hasRenderOnnxConfig()) {
+      try {
+        const { dataUrl } = await generateRenderOnnxImage(prompt)
+        return await respond(dataUrl, 'render-onnx')
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error'
+        console.warn('[generate-outfit-image] Render ONNX failed:', message)
+      }
+    }
+
+    // 2. FAL.ai — FLUX Pro v1.1, photorealistic fashion quality
     if (hasFalImageConfig()) {
       try {
         const { dataUrl, model } = await generateFalImage(prompt)

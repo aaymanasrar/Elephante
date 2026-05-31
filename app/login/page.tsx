@@ -101,6 +101,9 @@ export default function Login() {
 
           {/* Brand */}
           <div className="flex flex-col items-center mb-10">
+            <h1 className="sr-only">
+              {isAr ? 'تسجيل الدخول إلى Elephante' : 'Sign In to Elephante'}
+            </h1>
             <img
               src="/logo.png.png"
               alt="Elephante"

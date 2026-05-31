@@ -102,7 +102,7 @@ export default function SearchFooter({
   const detectedPieces = visibleLabels(attachmentAnalysis?.pieces || [])
   const uploadedPieces = visibleLabels(attachment?.pieces || [])
   const fallbackTags = attachment?.tags
-    .filter((tag) => tag.label && !['Color', 'Occasion'].includes(tag.label))
+    .filter((tag) => tag.label && !['Color', 'Type', 'Material', 'Pattern', 'Formality', 'Occasion'].includes(tag.label))
     .map((tag) => tag.label)
   const visibleDetections = detectedPieces.length
     ? detectedPieces

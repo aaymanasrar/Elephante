@@ -1,20 +1,17 @@
 'use client'
 
-import type { MutableRefObject } from 'react'
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import type { ReadonlyURLSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { insertGeneratedOutfit } from '@/services/outfitService'
 import { useAiSearchFlow, type AiContext } from '@/hooks/useAiSearchFlow'
 import { readFeedStateForQuery, useFeedStatePersistence } from '@/hooks/useFeedStatePersistence'
 import { useSearchQueryUrlSync } from '@/hooks/useFeedUi'
-import type { GeneratedOutfitResult, Outfit } from '@/types/outfit'
+import type { WeatherContext } from '@/services/feedSearchApi'
+import type { GeneratedOutfitResult } from '@/types/outfit'
 
 interface FeedSearchParams {
-  allOutfits: Outfit[]
-  allOutfitsRef: MutableRefObject<Outfit[]>
   displayName: string
-  getOutfitGender: (outfit: Outfit) => 'male' | 'female' | 'unisex'
   initialQuery: string
   isNaturalQuery: (query: string) => boolean
   onNavigateToLogin: () => void
@@ -28,14 +25,12 @@ interface FeedSearchParams {
   userStylePref: string
   userAvatarUrl?: string
   language?: 'en' | 'ar'
+  weather?: WeatherContext | null
   ready?: boolean
 }
 
 export function useFeedSearch({
-  allOutfits,
-  allOutfitsRef,
   displayName,
-  getOutfitGender,
   initialQuery,
   isNaturalQuery,
   onNavigateToLogin,
@@ -49,11 +44,12 @@ export function useFeedSearch({
   userStylePref,
   userAvatarUrl = '',
   language = 'en',
+  weather = null,
   ready = true,
 }: FeedSearchParams) {
   const restoredState = useState(() => readFeedStateForQuery<AiContext, GeneratedOutfitResult>(initialQuery))[0]
   const [searchQuery, setSearchQueryState] = useState(restoredState?.searchQuery || initialQuery)
-  const [inputValue, setInputValue] = useState(restoredState?.inputValue || initialQuery)
+  const [inputValue, setInputValue] = useState(restoredState != null ? restoredState.inputValue : initialQuery)
   const [curateTriggered, setCurateTriggered] = useState(false)
   const {
     aiContext,
@@ -73,11 +69,8 @@ export function useFeedSearch({
     setGeneratedOutfit,
     setGeneratingOutfit,
   } = useAiSearchFlow({
-    allOutfits,
-    allOutfitsRef,
     curateTriggered,
     displayName,
-    getOutfitGender,
     isNaturalQuery,
     searchQuery,
     userBodyShape,
@@ -86,6 +79,7 @@ export function useFeedSearch({
     userSkinTone,
     userStylePref,
     userAvatarUrl,
+    weather,
     initialAiContext: restoredState?.aiContext || null,
     initialChatHistory: restoredState?.chatHistory || [],
     initialCompletedQuery: restoredState?.searchQuery || '',
@@ -95,10 +89,10 @@ export function useFeedSearch({
     language,
     ready,
   })
-  const setSearchQuery = (value: string) => {
+  const setSearchQuery = useCallback((value: string) => {
     if (value !== searchQuery) setCurateTriggered(false)
     setSearchQueryState(value)
-  }
+  }, [searchQuery])
   const { saveFeedState } = useFeedStatePersistence({
     aiContext,
     chatHistory,
@@ -159,37 +153,26 @@ export function useFeedSearch({
     const lowerBase = baseIntent.toLowerCase()
 
     switch (chip) {
-      case 'More formal':
-        return `I want a more formal version of ${lowerBase}.`
-      case 'More casual':
-        return `I want a more casual version of ${lowerBase}.`
-      case 'Different colours':
-        return `Show me the same idea as ${lowerBase}, but in different colors.`
-      case 'Summer version':
-        return `Give me a summer version of ${lowerBase}.`
-      case 'Night out version':
-        return `Give me a night out version of ${lowerBase}.`
-      case 'Smart Casual':
-        return `${lowerBase} — show me smart casual outfit options.`
-      case 'Formal / Work':
-        return `${lowerBase} — I need formal or work-appropriate outfit options.`
-      case 'Weekend Casual':
-        return `${lowerBase} — give me casual weekend outfit ideas.`
-      case 'Night Out':
-        return `${lowerBase} — make it a night out look.`
-      case 'Summer Look':
-        return `${lowerBase} — show me summer outfit options.`
-      default:
-        return chip
+      case 'More formal': return `I want a more formal version of ${lowerBase}.`
+      case 'More casual': return `I want a more casual version of ${lowerBase}.`
+      case 'Different colours': return `Show me the same idea as ${lowerBase}, but in different colors.`
+      case 'Summer version': return `Give me a summer version of ${lowerBase}.`
+      case 'Night out version': return `Give me a night out version of ${lowerBase}.`
+      case 'Smart Casual': return `${lowerBase} — show me smart casual outfit options.`
+      case 'Formal / Work': return `${lowerBase} — I need formal or work-appropriate outfit options.`
+      case 'Weekend Casual': return `${lowerBase} — give me casual weekend outfit ideas.`
+      case 'Night Out': return `${lowerBase} — make it a night out look.`
+      case 'Summer Look': return `${lowerBase} — show me summer outfit options.`
+      default: return chip
     }
   }
 
-  const triggerCuration = () => {
+  const triggerCuration = useCallback(() => {
     lastGeneratedForRef.current = ''
     setCurateTriggered(true)
-  }
+  }, [lastGeneratedForRef])
 
-  const clearActiveSearchState = () => {
+  const clearActiveSearchState = useCallback(() => {
     setAiContext(null)
     setChatHistory([])
     setCurateTriggered(false)
@@ -197,7 +180,7 @@ export function useFeedSearch({
     setGeneratedOutfit(null)
     setGeneratingOutfit(false)
     setGeneratedIds({})
-  }
+  }, [setAiContext, setChatHistory, setFinalBanner, setGeneratedOutfit, setGeneratingOutfit, setGeneratedIds])
 
   return {
     aiContext,

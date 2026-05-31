@@ -5,7 +5,7 @@ import { useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 
 export interface WardrobeTag {
-  id: 'color' | 'item_type' | 'occasion'
+  id: 'color' | 'item_type' | 'material' | 'pattern' | 'formality' | 'occasion'
   label: string
 }
 
@@ -24,6 +24,11 @@ export interface WardrobeAttachment {
   item_type: string
   pieces: string[]
   color: string
+  material?: string
+  pattern?: string
+  season?: string
+  formality?: string
+  brand_visible?: string
   occasion: string
   style_query: string
   tags: WardrobeTag[]
@@ -97,6 +102,11 @@ export function useWardrobeAttachment(userId: string, onStyleQuery: (query: stri
         item_type: data.item_type,
         pieces: Array.isArray(data.pieces) ? data.pieces : [],
         color: data.color || '',
+        material: data.material || '',
+        pattern: data.pattern || '',
+        season: data.season || '',
+        formality: data.formality || '',
+        brand_visible: data.brand_visible || '',
         occasion: data.occasion || '',
         style_query: data.style_query || '',
         tags: Array.isArray(data.tags) ? data.tags : [],
@@ -123,6 +133,9 @@ export function useWardrobeAttachment(userId: string, onStyleQuery: (query: stri
         tags: nextTags,
         color: id === 'color' ? label : previous.color,
         item_type: id === 'item_type' ? label : previous.item_type,
+        material: id === 'material' ? label : previous.material,
+        pattern: id === 'pattern' ? label : previous.pattern,
+        formality: id === 'formality' ? label : previous.formality,
         occasion: id === 'occasion' ? label : previous.occasion,
       }
     })
@@ -146,12 +159,23 @@ export function useWardrobeAttachment(userId: string, onStyleQuery: (query: stri
         body: JSON.stringify({
           image_url: attachment.image_url,
           storage_path: attachment.storage_path,
+          original_image_url: attachment.original_image_url,
+          original_storage_path: attachment.original_storage_path,
+          image_prettified: attachment.image_prettified,
+          image_ai_edited: attachment.image_ai_edited,
+          image_provider: attachment.image_provider,
           item_name: attachment.item_name,
           item_type: attachment.item_type,
           pieces: attachment.pieces,
           color: attachment.color,
+          material: attachment.material || '',
+          pattern: attachment.pattern || '',
+          season: attachment.season || '',
+          formality: attachment.formality || '',
+          brand_visible: attachment.brand_visible || '',
           occasion: attachment.occasion,
           style_query: attachment.style_query || `style this ${attachment.item_type}`,
+          tags: attachment.tags,
         }),
       })
 

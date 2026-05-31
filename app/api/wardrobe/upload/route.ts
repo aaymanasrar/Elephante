@@ -5,6 +5,7 @@ import { requireEnv } from '@/lib/env'
 import { rateLimit } from '@/lib/rateLimit'
 import { prettifyWardrobeImage } from '@/lib/wardrobeImage'
 import { extractDominantColors } from '@/lib/colorAnalysis'
+import { classifyFashionItem, hasRenderOnnxConfig } from '@/lib/renderOnnxServer'
 
 export const runtime = 'nodejs'
 
@@ -28,6 +29,11 @@ const WARDROBE_PROMPT = `You are a fashion AI. Analyse this clothing image and r
   "item_type": "MUST be exactly one of these values: top | bottom | shoes | outerwear | accessory | full outfit | thobe | bisht | abaya | keffiyeh | agal",
   "pieces": ["every visible garment/accessory as a separate string"],
   "color": "primary colour name e.g. 'White', 'Navy', 'Olive'",
+  "material": "dominant fabric/material if visible e.g. 'cotton poplin', 'denim', 'leather', otherwise empty string",
+  "pattern": "visible pattern e.g. 'solid', 'pinstripe', 'plaid', 'floral', otherwise 'solid'",
+  "season": "best season e.g. 'Spring', 'Summer', 'Fall', 'Winter', or 'Year-round'",
+  "formality": "one of: casual | smart casual | business casual | formal | black tie",
+  "brand_visible": "brand name only if clearly visible, otherwise empty string",
   "occasion": "one suitable occasion e.g. 'Office', 'Weekend', 'Wedding Guest', 'Eid', 'Ramadan', 'Majlis', 'Formal', 'Casual'",
   "style_query": "a natural search query e.g. 'outfits to wear with white linen shirt'"
 }
@@ -65,6 +71,34 @@ function normalizePieces(value: unknown) {
     seen.add(normalized)
     return true
   })
+}
+
+function parseWardrobeAnalysis(parsed: Record<string, unknown>) {
+  const itemName = asString(parsed.item_name, 'Clothing item')
+  const itemType = asString(parsed.item_type, 'top')
+  const pieces = normalizePieces(parsed.pieces)
+  const color = asString(parsed.color)
+  const material = asString(parsed.material)
+  const pattern = asString(parsed.pattern)
+  const season = asString(parsed.season)
+  const formality = asString(parsed.formality)
+  const brandVisible = asString(parsed.brand_visible)
+  const occasion = asString(parsed.occasion)
+  const styleQuery = asString(parsed.style_query, `outfits to wear with ${pieces.length ? pieces.join(', ') : itemName}`)
+
+  return {
+    itemName,
+    itemType,
+    pieces,
+    color,
+    material,
+    pattern,
+    season,
+    formality,
+    brandVisible,
+    occasion,
+    styleQuery,
+  }
 }
 
 async function getAuthenticatedUserId(request: NextRequest, supabaseUrl: string, supabaseAnonKey: string) {
@@ -163,13 +197,65 @@ async function handleAnalyze(request: NextRequest, userId: string, supabase: Sup
   const buffer = Buffer.from(await file.arrayBuffer())
   const originalPublicUrl = await uploadWardrobeImage(supabase, originalPath, buffer, imageType)
 
+  let itemName = 'Clothing item'
+  let itemType = 'top'
+  let pieces: string[] = []
+  let color = ''
+  let material = ''
+  let pattern = ''
+  let season = ''
+  let formality = ''
+  let brandVisible = ''
+  let occasion = ''
+  let styleQuery = ''
+  let analysisProvider = ''
+
+  const analyzeUpload = async (images: string | string[]) => {
+    const result = await analyzeImageWithFallback(images, WARDROBE_PROMPT)
+    const parsed = extractJSON(result.content) as Record<string, unknown>
+    const analysis = parseWardrobeAnalysis(parsed)
+    itemName = analysis.itemName
+    itemType = analysis.itemType
+    pieces = analysis.pieces
+    color = analysis.color
+    material = analysis.material
+    pattern = analysis.pattern
+    season = analysis.season
+    formality = analysis.formality
+    brandVisible = analysis.brandVisible
+    occasion = analysis.occasion
+    styleQuery = analysis.styleQuery
+    analysisProvider = result.provider
+  }
+
+  try {
+    await analyzeUpload(originalPublicUrl)
+  } catch {
+    styleQuery = `style this ${itemType}`
+  }
+
+  try {
+    if (hasRenderOnnxConfig()) {
+      const detection = await classifyFashionItem(originalPublicUrl)
+      if (detection.item_type && detection.confidence >= 0.25) itemType = detection.item_type
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    console.warn('[wardrobe/upload] clothing classifier failed:', message)
+  }
+
   let path: string
   let publicUrl: string
   let imageAiEdited = false
   let imageProvider = ''
 
   try {
-    const prettified = await prettifyWardrobeImage(buffer, userId)
+    const prettified = await prettifyWardrobeImage(buffer, userId, {
+      itemName,
+      itemType,
+      pieces,
+      subjectHint: [itemName, itemType, color, material, pattern].filter(Boolean).join(', '),
+    })
     const cleanPath = `${userId}/wardrobe/clean/${timestamp}.${prettified.extension}`
     publicUrl = await uploadWardrobeImage(supabase, cleanPath, prettified.buffer, prettified.contentType)
     path = cleanPath
@@ -182,25 +268,12 @@ async function handleAnalyze(request: NextRequest, userId: string, supabase: Sup
     return NextResponse.json({ error: message }, { status: 422 })
   }
 
-  let itemName = 'Clothing item'
-  let itemType = 'top'
-  let pieces: string[] = []
-  let color = ''
-  let occasion = ''
-  let styleQuery = ''
-
-  try {
-    const analysisImages = publicUrl === originalPublicUrl ? [originalPublicUrl] : [originalPublicUrl, publicUrl]
-    const { content } = await analyzeImageWithFallback(analysisImages, WARDROBE_PROMPT)
-    const parsed = extractJSON(content)
-    itemName = asString(parsed.item_name, itemName)
-    itemType = asString(parsed.item_type, itemType)
-    pieces = normalizePieces(parsed.pieces)
-    color = asString(parsed.color, color)
-    occasion = asString(parsed.occasion, occasion)
-    styleQuery = asString(parsed.style_query, `outfits to wear with ${pieces.length ? pieces.join(', ') : itemName}`)
-  } catch {
-    styleQuery = `style this ${itemType}`
+  if (!pieces.length || itemName === 'Clothing item') {
+    try {
+      await analyzeUpload([originalPublicUrl, publicUrl])
+    } catch {
+      styleQuery = styleQuery || `style this ${itemType}`
+    }
   }
 
   // Enhance the color field with dominant colors from the uploaded image.
@@ -230,22 +303,31 @@ async function handleAnalyze(request: NextRequest, userId: string, supabase: Sup
     image_prettified: true,
     image_ai_edited: imageAiEdited,
     image_provider: imageProvider,
+    analysis_provider: analysisProvider,
     item_name: itemName,
     item_type: itemType,
     pieces,
     color,
+    material,
+    pattern,
+    season,
+    formality,
+    brand_visible: brandVisible,
     occasion,
     style_query: styleQuery,
     tags: [
       { id: 'color', label: color || 'Color' },
       { id: 'item_type', label: itemType || 'Type' },
+      { id: 'material', label: material || 'Material' },
+      { id: 'pattern', label: pattern || 'Pattern' },
+      { id: 'formality', label: formality || 'Formality' },
       { id: 'occasion', label: occasion || 'Occasion' },
     ],
   })
 }
 
-async function safeInsertClosetItem(supabase: SupabaseClient, payload: any) {
-  let currentPayload = { ...payload }
+async function safeInsertClosetItem(supabase: SupabaseClient, payload: Record<string, unknown>) {
+  const currentPayload = { ...payload }
   
   while (true) {
     const { data, error } = await supabase
@@ -287,8 +369,18 @@ async function handleConfirm(request: NextRequest, userId: string, supabase: Sup
   const itemName = typeof body?.item_name === 'string' ? body.item_name : 'Clothing item'
   const itemType = typeof body?.item_type === 'string' ? body.item_type : 'top'
   const color = typeof body?.color === 'string' ? body.color : ''
+  const material = typeof body?.material === 'string' ? body.material : ''
+  const pattern = typeof body?.pattern === 'string' ? body.pattern : ''
+  const season = typeof body?.season === 'string' ? body.season : ''
+  const formality = typeof body?.formality === 'string' ? body.formality : ''
+  const brandVisible = typeof body?.brand_visible === 'string' ? body.brand_visible : ''
   const occasion = typeof body?.occasion === 'string' ? body.occasion : ''
   const styleQuery = typeof body?.style_query === 'string' ? body.style_query : `style this ${itemType}`
+  const originalImageUrl = typeof body?.original_image_url === 'string' ? body.original_image_url : ''
+  const originalStoragePath = typeof body?.original_storage_path === 'string' ? body.original_storage_path : ''
+  const imageProvider = typeof body?.image_provider === 'string' ? body.image_provider : ''
+  const imageAiEdited = Boolean(body?.image_ai_edited)
+  const imagePrettified = body?.image_prettified !== false
 
   if (!imageUrl || !storagePath || !storagePath.startsWith(`${userId}/`)) {
     return NextResponse.json({ error: 'A valid wardrobe upload is required.' }, { status: 400 })
@@ -299,9 +391,19 @@ async function handleConfirm(request: NextRequest, userId: string, supabase: Sup
     category: categoryFromItemType(itemType),
     image_url: imageUrl,
     storage_path: storagePath,
+    original_image_url: originalImageUrl || null,
+    original_storage_path: originalStoragePath || null,
+    image_prettified: imagePrettified,
+    image_ai_edited: imageAiEdited,
+    image_provider: imageProvider || null,
     item_name: itemName,
     item_type: itemType,
     color,
+    material,
+    pattern,
+    season,
+    formality,
+    brand: brandVisible,
     occasion,
     style_query: styleQuery,
   })

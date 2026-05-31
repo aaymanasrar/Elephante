@@ -148,6 +148,10 @@ export default function TravelPackPage() {
       })
       const data = await res.json()
       if (data.error) { setError(data.error); return }
+      if (!data.packingList || (!data.packingList.outfits && !data.packingList.essentials)) {
+        setError(t.error)
+        return
+      }
       setPackingList(data.packingList)
     } catch {
       setError(t.error)

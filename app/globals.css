@@ -5,6 +5,43 @@
   --foreground: #171717;
   --font-display: 'Cormorant', Georgia, serif;
   --font-body: 'Montserrat', var(--font-geist-sans), sans-serif;
+  --elephante-bg: #050505;
+  --elephante-surface: #09090b;
+  --elephante-surface-soft: rgba(24, 24, 27, 0.72);
+  --elephante-text: #ffffff;
+  --elephante-muted: #71717a;
+  --elephante-faint: #3f3f46;
+  --elephante-border: rgba(255, 255, 255, 0.1);
+  --elephante-inverse-bg: #ffffff;
+  --elephante-inverse-text: #050505;
+}
+
+html[data-theme="dark"] {
+  --background: #050505;
+  --foreground: #ededed;
+  --elephante-bg: #050505;
+  --elephante-surface: #09090b;
+  --elephante-surface-soft: rgba(24, 24, 27, 0.72);
+  --elephante-text: #ffffff;
+  --elephante-muted: #71717a;
+  --elephante-faint: #3f3f46;
+  --elephante-border: rgba(255, 255, 255, 0.1);
+  --elephante-inverse-bg: #ffffff;
+  --elephante-inverse-text: #050505;
+}
+
+html[data-theme="light"] {
+  --background: #f6f7f8;
+  --foreground: #171717;
+  --elephante-bg: #f6f7f8;
+  --elephante-surface: #ffffff;
+  --elephante-surface-soft: rgba(255, 255, 255, 0.76);
+  --elephante-text: #171717;
+  --elephante-muted: #6f7177;
+  --elephante-faint: #a1a1aa;
+  --elephante-border: rgba(23, 23, 23, 0.13);
+  --elephante-inverse-bg: #171717;
+  --elephante-inverse-text: #f8fafc;
 }
 
 @theme inline {
@@ -15,7 +52,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  html:not([data-theme]) {
     --background: #0a0a0a;
     --foreground: #ededed;
   }
@@ -33,8 +70,8 @@ body {
 
 /* Selection */
 ::selection {
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
+  background: color-mix(in srgb, var(--elephante-text) 14%, transparent);
+  color: var(--elephante-text);
 }
 
 /* Scrollbar — webkit */
@@ -78,4 +115,89 @@ body {
   background: linear-gradient(90deg, #1a1a1a 25%, #242424 50%, #1a1a1a 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
+}
+
+html[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: rgba(23, 23, 23, 0.16);
+}
+
+html[data-theme="light"] .bg-black,
+html[data-theme="light"] [class*="bg-black/"] {
+  background-color: var(--elephante-bg) !important;
+}
+
+html[data-theme="light"] [class*="bg-zinc-950"],
+html[data-theme="light"] [class*="bg-zinc-900"],
+html[data-theme="light"] [class*="bg-zinc-800"] {
+  background-color: var(--elephante-surface-soft) !important;
+}
+
+html[data-theme="light"] .bg-white {
+  background-color: var(--elephante-inverse-bg) !important;
+}
+
+html[data-theme="light"] .bg-transparent,
+html[data-theme="light"] .outfit-image-surface {
+  background-color: transparent !important;
+}
+
+html[data-theme="light"] .text-white,
+html[data-theme="light"] [class*="text-zinc-100"],
+html[data-theme="light"] [class*="text-zinc-200"],
+html[data-theme="light"] [class*="text-zinc-300"] {
+  color: var(--elephante-text) !important;
+}
+
+html[data-theme="light"] [class*="text-zinc-400"],
+html[data-theme="light"] [class*="text-zinc-500"],
+html[data-theme="light"] [class*="text-zinc-600"],
+html[data-theme="light"] [class*="text-zinc-700"],
+html[data-theme="light"] [class*="text-zinc-800"] {
+  color: var(--elephante-muted) !important;
+}
+
+html[data-theme="light"] .text-black {
+  color: var(--elephante-inverse-text) !important;
+}
+
+html[data-theme="light"] [class*="border-zinc-"],
+html[data-theme="light"] [class*="border-white/"],
+html[data-theme="light"] .border-white {
+  border-color: var(--elephante-border) !important;
+}
+
+html[data-theme="light"] .ring-white,
+html[data-theme="light"] [class*="ring-white/"] {
+  --tw-ring-color: rgba(23, 23, 23, 0.24) !important;
+}
+
+html[data-theme="light"] .ring-offset-black {
+  --tw-ring-offset-color: var(--elephante-bg) !important;
+}
+
+html[data-theme="light"] .from-black {
+  --tw-gradient-from: var(--elephante-bg) var(--tw-gradient-from-position) !important;
+  --tw-gradient-to: rgba(246, 247, 248, 0) var(--tw-gradient-to-position) !important;
+}
+
+html[data-theme="light"] .via-black,
+html[data-theme="light"] [class*="via-black/"] {
+  --tw-gradient-via: rgba(246, 247, 248, 0.96) var(--tw-gradient-via-position) !important;
+}
+
+html[data-theme="light"] .to-transparent {
+  --tw-gradient-to: rgba(246, 247, 248, 0) var(--tw-gradient-to-position) !important;
+}
+
+html[data-theme="light"] .skeleton {
+  background: linear-gradient(90deg, #eceff3 25%, #f8fafc 50%, #eceff3 75%);
+  background-size: 200% 100%;
+}
+
+.outfit-image-surface {
+  background: transparent !important;
+}
+
+.outfit-image-surface img {
+  background: transparent !important;
 }

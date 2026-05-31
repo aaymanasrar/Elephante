@@ -2,14 +2,18 @@ import OpenAI, { toFile } from 'openai'
 import { removeBackground, type Config as BackgroundRemovalConfig } from '@imgly/background-removal-node'
 import sharp from 'sharp'
 import { getOpenAIKeys } from '@/lib/openaiKeys'
+import { hasRenderOnnxConfig, segmentGarment } from '@/lib/renderOnnxServer'
 
 const CANVAS_SIZE = 1024
 const ITEM_BOUNDS = 900
 const TRANSPARENT = { r: 0, g: 0, b: 0, alpha: 0 }
 const ALPHA_COMPONENT_THRESHOLD = 12
+const MIN_FOREGROUND_RATIO = 0.006
+const MIN_TRANSPARENT_RATIO = 0.04
 
 type PrettifyQuality = 'low' | 'medium' | 'high' | 'auto'
 type BackgroundRemovalModel = 'small' | 'medium' | 'large'
+type PrettifyMode = 'safe' | 'premium'
 
 export interface WardrobeImagePrettifyResult {
   buffer: Buffer
@@ -17,6 +21,15 @@ export interface WardrobeImagePrettifyResult {
   extension: 'png'
   provider: string
   aiEdited: boolean
+}
+
+export interface WardrobeImagePrettifyOptions {
+  itemName?: string | null
+  itemType?: string | null
+  pieces?: string[] | null
+  subjectHint?: string | null
+  mode?: PrettifyMode | null
+  requireSubjectIsolation?: boolean | null
 }
 
 type ExtractedImage = {
@@ -39,6 +52,10 @@ function normalizePrettifyQuality(value?: string): PrettifyQuality {
 function normalizeBackgroundRemovalModel(value?: string): BackgroundRemovalModel {
   if (value === 'small' || value === 'medium' || value === 'large') return value
   return 'medium'
+}
+
+function normalizePrettifyMode(value?: string | null): PrettifyMode {
+  return value === 'premium' ? 'premium' : 'safe'
 }
 
 function isPrettifyEnabled() {
@@ -66,6 +83,44 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
 
+function cleanPromptText(value?: string | null) {
+  return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, 240) : ''
+}
+
+function buildGarmentSubject(options?: WardrobeImagePrettifyOptions) {
+  const pieces = Array.isArray(options?.pieces)
+    ? options.pieces.map((piece) => cleanPromptText(piece)).filter(Boolean).slice(0, 5)
+    : []
+  const parts = [
+    cleanPromptText(options?.subjectHint),
+    cleanPromptText(options?.itemName),
+    cleanPromptText(options?.itemType),
+    ...pieces,
+  ].filter(Boolean)
+
+  return parts.length
+    ? `Target garment only: ${parts.join(', ')}. Exclude hangers, hands, bodies, furniture, mirrors, walls, floors, shadows, labels floating outside the garment, and room background.`
+    : 'Target garment only. Exclude hangers, hands, bodies, furniture, mirrors, walls, floors, shadows, and room background.'
+}
+
+function buildPrettifyPrompt(options?: WardrobeImagePrettifyOptions) {
+  return `${WARDROBE_PRETTIFY_PROMPT}\n\n${buildGarmentSubject(options)}`
+}
+
+function hasPhotoroomConfig() {
+  return Boolean(process.env.PHOTOROOM_API_KEY?.trim())
+}
+
+function photoroomTimeoutMs() {
+  const value = Number(process.env.PHOTOROOM_TIMEOUT_MS)
+  return Number.isFinite(value) && value > 0 ? value : 60_000
+}
+
+function buildPhotoroomSegmentationPrompt(options?: WardrobeImagePrettifyOptions) {
+  const subject = buildGarmentSubject(options)
+  return `${subject} Keep only the described garment or accessory. Remove all other clothing pieces, face, skin, hair, body, background, furniture, walls, floors, and props.`
+}
+
 async function prepareSourceImage(buffer: Buffer) {
   return sharp(buffer, { failOn: 'none' })
     .rotate()
@@ -88,6 +143,72 @@ async function downloadImageBuffer(imageUrl: string) {
 
 async function blobToBuffer(blob: Blob) {
   return Buffer.from(await blob.arrayBuffer())
+}
+
+async function assertUsableCutout(buffer: Buffer, provider: string) {
+  const { data, info } = await sharp(buffer, { failOn: 'none' })
+    .rotate()
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true })
+
+  const { width, height, channels } = info
+  const pixelCount = width * height
+  if (!pixelCount || channels < 4) throw new Error(`${provider} did not return a usable cutout.`)
+
+  let foreground = 0
+  let minX = width
+  let maxX = -1
+  let minY = height
+  let maxY = -1
+
+  for (let pixel = 0; pixel < pixelCount; pixel += 1) {
+    const alpha = data[pixel * channels + 3] || 0
+    if (alpha <= ALPHA_COMPONENT_THRESHOLD) continue
+
+    foreground += 1
+    const x = pixel % width
+    const y = Math.floor(pixel / width)
+    if (x < minX) minX = x
+    if (x > maxX) maxX = x
+    if (y < minY) minY = y
+    if (y > maxY) maxY = y
+  }
+
+  const foregroundRatio = foreground / pixelCount
+  const transparentRatio = 1 - foregroundRatio
+  const boxWidth = maxX >= minX ? maxX - minX + 1 : 0
+  const boxHeight = maxY >= minY ? maxY - minY + 1 : 0
+  const nearlyFullFrame = boxWidth > width * 0.97 && boxHeight > height * 0.97
+  const boxArea = boxWidth * boxHeight
+  const boxFillRatio = boxArea > 0 ? foreground / boxArea : 0
+  const looksLikeOpaquePhoto = boxFillRatio > 0.92 && boxWidth > width * 0.5 && boxHeight > height * 0.5
+
+  if (
+    foregroundRatio < MIN_FOREGROUND_RATIO ||
+    transparentRatio < MIN_TRANSPARENT_RATIO ||
+    boxWidth < 24 ||
+    boxHeight < 24 ||
+    nearlyFullFrame ||
+    looksLikeOpaquePhoto
+  ) {
+    throw new Error(`${provider} returned the full photo instead of an isolated garment.`)
+  }
+}
+
+async function polishCutout(buffer: Buffer, provider: string) {
+  const componentCleaned = await removeStrayAlphaComponents(buffer)
+  const polished = await sharp(componentCleaned, { failOn: 'none' })
+    .rotate()
+    .ensureAlpha()
+    .toColorspace('srgb')
+    .modulate({ brightness: 1.015, saturation: 1.02 })
+    .sharpen({ sigma: 0.45, m1: 0.35, m2: 0.25 })
+    .png({ compressionLevel: 9 })
+    .toBuffer()
+  const padded = await padToCatalogCanvas(polished, TRANSPARENT)
+  await assertUsableCutout(padded, provider)
+  return padded
 }
 
 async function removeStrayAlphaComponents(buffer: Buffer) {
@@ -188,14 +309,14 @@ async function removeStrayAlphaComponents(buffer: Buffer) {
   const keepLabels = new Set<number>([primary.label])
   const primaryCenterX = primary.componentX
   const primaryCenterY = primary.componentY
-  const minMeaningfulArea = pixelCount * 0.002
+  const minMeaningfulArea = pixelCount * 0.0015
 
   for (const component of scored) {
     if (component.label === primary.label) continue
 
     const distanceFromPrimary = Math.hypot(component.componentX - primaryCenterX, component.componentY - primaryCenterY) / maxDistance
     const isCloseCompanion = component.area >= primary.area * 0.08 && distanceFromPrimary < 0.38
-    const isCentralPiece = component.area >= minMeaningfulArea && component.distance < 0.42
+    const isCentralPiece = component.area >= minMeaningfulArea && component.distance < 0.55
 
     if (isCloseCompanion || isCentralPiece) keepLabels.add(component.label)
   }
@@ -241,14 +362,19 @@ async function imageFromSamResponse(response: Response) {
   return Buffer.from(value.replace(/\s/g, ''), 'base64')
 }
 
-async function trySamExtract(buffer: Buffer): Promise<ExtractedImage | null> {
+async function trySamExtract(buffer: Buffer, options?: WardrobeImagePrettifyOptions): Promise<ExtractedImage | null> {
   const endpoint = process.env.SAM_SEGMENTATION_URL?.trim()
   if (!endpoint) return null
 
   try {
     const source = await prepareSourceImage(buffer)
+    const subject = buildGarmentSubject(options)
     const formData = new FormData()
     formData.append('image', new Blob([new Uint8Array(source)], { type: 'image/jpeg' }), 'wardrobe-source.jpg')
+    formData.append('prompt', subject)
+    formData.append('text_prompt', subject)
+    formData.append('labels', 'clothing, garment, apparel, shoes, bag, accessory')
+    formData.append('output', 'transparent_png')
 
     const response = await fetch(endpoint, {
       method: 'POST',
@@ -262,13 +388,34 @@ async function trySamExtract(buffer: Buffer): Promise<ExtractedImage | null> {
     }
 
     return {
-      buffer: await padToCatalogCanvas(await removeStrayAlphaComponents(await imageFromSamResponse(response)), TRANSPARENT),
+      buffer: await polishCutout(await imageFromSamResponse(response), 'sam'),
       provider: 'sam',
       aiEdited: false,
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
     console.warn('[wardrobe-image] SAM segmentation failed:', message)
+    return null
+  }
+}
+
+async function tryRenderOnnxSegmentation(buffer: Buffer): Promise<ExtractedImage | null> {
+  if (!hasRenderOnnxConfig()) return null
+
+  try {
+    const source = await prepareSourceImage(buffer)
+    const { dataUrl } = await segmentGarment(`data:image/jpeg;base64,${source.toString('base64')}`)
+    const output = readDataUrl(dataUrl)
+    if (!output) throw new Error('Render ONNX segmentation did not return an image.')
+
+    return {
+      buffer: await polishCutout(output, 'render-onnx-segment'),
+      provider: 'render-onnx-segment',
+      aiEdited: false,
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    console.warn('[wardrobe-image] Render ONNX segmentation failed:', message)
     return null
   }
 }
@@ -289,7 +436,7 @@ async function tryLocalBackgroundRemoval(buffer: Buffer): Promise<ExtractedImage
     const cleaned = await removeStrayAlphaComponents(await blobToBuffer(foreground))
 
     return {
-      buffer: await padToCatalogCanvas(cleaned, TRANSPARENT),
+      buffer: await polishCutout(cleaned, `imgly-background-removal-${model}`),
       provider: `imgly-background-removal-${model}`,
       aiEdited: false,
     }
@@ -353,7 +500,7 @@ async function padToCatalogCanvas(buffer: Buffer, background: sharp.Color) {
     .toBuffer()
 }
 
-async function tryOpenAIPrettify(buffer: Buffer, userId: string): Promise<ExtractedImage | null> {
+async function tryOpenAIPrettify(buffer: Buffer, userId: string, options?: WardrobeImagePrettifyOptions): Promise<ExtractedImage | null> {
   if (!isPrettifyEnabled()) return null
 
   const keys = getOpenAIKeys()
@@ -370,7 +517,7 @@ async function tryOpenAIPrettify(buffer: Buffer, userId: string): Promise<Extrac
       const response = await client.images.edit({
         model,
         image: await toFile(source, 'wardrobe-source.jpg', { type: 'image/jpeg' }),
-        prompt: WARDROBE_PRETTIFY_PROMPT,
+        prompt: buildPrettifyPrompt(options),
         size: '1024x1024',
         quality,
         background: 'transparent',
@@ -389,7 +536,7 @@ async function tryOpenAIPrettify(buffer: Buffer, userId: string): Promise<Extrac
 
       if (output) {
         return {
-          buffer: await padToCatalogCanvas(await removeStrayAlphaComponents(output), TRANSPARENT),
+          buffer: await polishCutout(output, model),
           provider: model,
           aiEdited: true,
         }
@@ -401,6 +548,52 @@ async function tryOpenAIPrettify(buffer: Buffer, userId: string): Promise<Extrac
   }
 
   return null
+}
+
+async function tryPhotoroomEditCutout(buffer: Buffer, options?: WardrobeImagePrettifyOptions): Promise<ExtractedImage | null> {
+  const apiKey = process.env.PHOTOROOM_API_KEY?.trim()
+  if (!apiKey) return null
+
+  try {
+    const source = await prepareSourceImage(buffer)
+    const formData = new FormData()
+    formData.append(
+      'imageFile',
+      new Blob([new Uint8Array(source)], { type: 'image/jpeg' }),
+      'wardrobe-source.jpg',
+    )
+    formData.append('removeBackground', 'true')
+    formData.append('export.format', 'png')
+    formData.append('segmentation.prompt', buildPhotoroomSegmentationPrompt(options))
+    formData.append(
+      'segmentation.negativePrompt',
+      'background, person, face, skin, hair, body, hands, legs, other garments, hangers, furniture, floor, wall, mirror, props',
+    )
+
+    const response = await fetch('https://image-api.photoroom.com/v2/edit', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+      },
+      body: formData,
+      signal: AbortSignal.timeout(photoroomTimeoutMs()),
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '')
+      throw new Error(`Photoroom image edit failed (${response.status}): ${errorText || response.statusText}`)
+    }
+
+    return {
+      buffer: await polishCutout(Buffer.from(await response.arrayBuffer()), 'photoroom-v2-edit'),
+      provider: 'photoroom-v2-edit',
+      aiEdited: false,
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    console.warn('[wardrobe-image] Photoroom image edit failed:', message)
+    return null
+  }
 }
 
 async function tryPhotoroomPrettify(buffer: Buffer): Promise<ExtractedImage | null> {
@@ -416,6 +609,8 @@ async function tryPhotoroomPrettify(buffer: Buffer): Promise<ExtractedImage | nu
       'wardrobe-source.jpg',
     )
     formData.append('format', 'png')
+    formData.append('channels', 'rgba')
+    formData.append('size', process.env.PHOTOROOM_REMOVE_BACKGROUND_SIZE || 'full')
 
     const response = await fetch('https://sdk.photoroom.com/v1/segment', {
       method: 'POST',
@@ -423,7 +618,7 @@ async function tryPhotoroomPrettify(buffer: Buffer): Promise<ExtractedImage | nu
         'x-api-key': apiKey,
       },
       body: formData,
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(photoroomTimeoutMs()),
     })
 
     if (!response.ok) {
@@ -435,7 +630,7 @@ async function tryPhotoroomPrettify(buffer: Buffer): Promise<ExtractedImage | nu
     const output = Buffer.from(arrayBuffer)
 
     return {
-      buffer: await padToCatalogCanvas(await removeStrayAlphaComponents(output), TRANSPARENT),
+      buffer: await polishCutout(output, 'photoroom'),
       provider: 'photoroom',
       aiEdited: false,
     }
@@ -446,57 +641,69 @@ async function tryPhotoroomPrettify(buffer: Buffer): Promise<ExtractedImage | nu
   }
 }
 
-export async function prettifyWardrobeImage(buffer: Buffer, userId: string): Promise<WardrobeImagePrettifyResult> {
-  const photoroomImage = await tryPhotoroomPrettify(buffer)
-  if (photoroomImage) {
-    return {
-      buffer: photoroomImage.buffer,
-      contentType: 'image/png',
-      extension: 'png',
-      provider: photoroomImage.provider,
-      aiEdited: photoroomImage.aiEdited,
+function asPrettifyResult(image: ExtractedImage): WardrobeImagePrettifyResult {
+  return {
+    buffer: image.buffer,
+    contentType: 'image/png',
+    extension: 'png',
+    provider: image.provider,
+    aiEdited: image.aiEdited,
+  }
+}
+
+export async function prettifyWardrobeImage(
+  buffer: Buffer,
+  userId: string,
+  options?: WardrobeImagePrettifyOptions,
+): Promise<WardrobeImagePrettifyResult> {
+  const mode = normalizePrettifyMode(options?.mode || process.env.WARDROBE_PRETTIFY_MODE)
+  const requireSubjectIsolation = Boolean(options?.requireSubjectIsolation)
+
+  if (hasPhotoroomConfig() && requireSubjectIsolation) {
+    const photoroomEdited = await tryPhotoroomEditCutout(buffer, options)
+    if (photoroomEdited) return asPrettifyResult(photoroomEdited)
+  }
+
+  if (!requireSubjectIsolation) {
+    const photoroomImage = await tryPhotoroomPrettify(buffer)
+    if (photoroomImage) return asPrettifyResult(photoroomImage)
+  }
+
+  if (!requireSubjectIsolation) {
+    const renderOnnxImage = await tryRenderOnnxSegmentation(buffer)
+    if (renderOnnxImage) {
+      return asPrettifyResult(renderOnnxImage)
     }
   }
 
-  const samImage = await trySamExtract(buffer)
+  const samImage = await trySamExtract(buffer, options)
   if (samImage) {
-    return {
-      buffer: samImage.buffer,
-      contentType: 'image/png',
-      extension: 'png',
-      provider: samImage.provider,
-      aiEdited: samImage.aiEdited,
-    }
+    return asPrettifyResult(samImage)
   }
 
-  const localCutout = await tryLocalBackgroundRemoval(buffer)
-  if (localCutout) {
-    return {
-      buffer: localCutout.buffer,
-      contentType: 'image/png',
-      extension: 'png',
-      provider: localCutout.provider,
-      aiEdited: localCutout.aiEdited,
+  if (mode === 'premium') {
+    const aiImage = await tryOpenAIPrettify(buffer, userId, options)
+    if (aiImage) return asPrettifyResult(aiImage)
+  }
+
+  if (!requireSubjectIsolation) {
+    const localCutout = await tryLocalBackgroundRemoval(buffer)
+    if (localCutout) {
+      return asPrettifyResult(localCutout)
     }
   }
 
   let aiImage: ExtractedImage | null = null
 
   try {
-    aiImage = await tryOpenAIPrettify(buffer, userId)
+    aiImage = await tryOpenAIPrettify(buffer, userId, options)
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
     console.warn('[wardrobe-image] AI prettify setup failed:', message)
   }
 
   if (aiImage) {
-    return {
-      buffer: aiImage.buffer,
-      contentType: 'image/png',
-      extension: 'png',
-      provider: aiImage.provider,
-      aiEdited: aiImage.aiEdited,
-    }
+    return asPrettifyResult(aiImage)
   }
 
   throw new Error('Could not isolate the clothing pieces. Please upload a clearer photo with the garments visible.')

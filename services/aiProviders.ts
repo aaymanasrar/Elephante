@@ -81,18 +81,18 @@ interface TextProvider {
 const TEXT_PROVIDERS: TextProvider[] = [
   // ── Tier 1: Best reasoning + JSON fidelity for fashion tasks ─────────────
   {
-    // Gemini 2.5 Flash: top free model for complex structured output & fashion reasoning
+    // Gemini 2.5 Flash: fast structured output and fashion reasoning
     name:    'GoogleAIStudio',
     apiKey:  process.env.GOOGLE_AI_STUDIO_KEY,
     baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
-    model:   'gemini-1.5-flash',
+    model:   'gemini-2.5-flash',
   },
   {
-    // Gemini 2.0 Flash: fast fallback on same Google key pool
+    // Gemini Flash fallback on a separate key pool
     name:    'Gemini',
     apiKey:  process.env.GEMINI_API_KEY,
     baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
-    model:   'gemini-1.5-flash',
+    model:   'gemini-2.5-flash',
   },
   // ── Tier 2: Fast free inference ───────────────────────────────────────────
   {
@@ -348,13 +348,13 @@ export async function analyzeImageWithFallback(
 
   // 1. Google AI Studio — gemini-2.5-flash
   if (process.env.GOOGLE_AI_STUDIO_KEY) {
-    const r = await tryOAI(process.env.GOOGLE_AI_STUDIO_KEY, 'https://generativelanguage.googleapis.com/v1beta/openai/', 'gemini-1.5-flash', 'GoogleAIStudio')
+    const r = await tryOAI(process.env.GOOGLE_AI_STUDIO_KEY, 'https://generativelanguage.googleapis.com/v1beta/openai/', 'gemini-2.5-flash', 'GoogleAIStudio')
     if (r) return r
   }
 
   // 2. Groq
   if (process.env.GROQ_API_KEY) {
-    const r = await tryOAI(process.env.GROQ_API_KEY, 'https://api.groq.com/openai/v1', 'llama-3.2-11b-vision-preview', 'Groq')
+    const r = await tryOAI(process.env.GROQ_API_KEY, 'https://api.groq.com/openai/v1', 'meta-llama/llama-4-scout-17b-16e-instruct', 'Groq')
     if (r) return r
   }
 
@@ -377,9 +377,9 @@ export async function analyzeImageWithFallback(
     }
   }
 
-  // 4. Gemini 2.0 Flash
+  // 4. Gemini Flash
   if (process.env.GEMINI_API_KEY) {
-    const r = await tryOAI(process.env.GEMINI_API_KEY, 'https://generativelanguage.googleapis.com/v1beta/openai/', 'gemini-1.5-flash', 'Gemini')
+    const r = await tryOAI(process.env.GEMINI_API_KEY, 'https://generativelanguage.googleapis.com/v1beta/openai/', 'gemini-2.5-flash', 'Gemini')
     if (r) return r
   }
 
@@ -388,7 +388,7 @@ export async function analyzeImageWithFallback(
     const r = await tryOAI(
       process.env.OPENROUTER_API_KEY,
       'https://openrouter.ai/api/v1',
-      'meta-llama/llama-4-scout:free',
+      'meta-llama/llama-4-scout',
       'OpenRouter',
       { 'HTTP-Referer': 'https://elephante.app', 'X-OpenRouter-Title': 'Elephante' },
     )

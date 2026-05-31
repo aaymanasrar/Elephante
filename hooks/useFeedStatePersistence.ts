@@ -24,6 +24,14 @@ interface FeedStatePersistenceParams<TAiContext, TGeneratedOutfit> {
 
 export const FEED_STATE_KEY = 'elephante_feed_state'
 export const FEED_LAST_URL_KEY = 'elephante_last_feed_url'
+const AUTOMATIC_FEED_QUERIES = new Set([
+  'suggest outfits for me today',
+  'اقترح لي إطلالات اليوم',
+])
+
+export function isAutomaticFeedQuery(query: string) {
+  return AUTOMATIC_FEED_QUERIES.has(query.trim().toLowerCase())
+}
 
 function isPersistedFeedState<TAiContext, TGeneratedOutfit>(state: unknown): state is PersistedFeedState<TAiContext, TGeneratedOutfit> {
   return Boolean(state && typeof state === 'object' && typeof (state as { searchQuery?: unknown }).searchQuery === 'string')
@@ -47,6 +55,7 @@ function normalizeChatHistory(history: Array<{ role: 'user' | 'assistant'; conte
 
 export function readFeedStateForQuery<TAiContext, TGeneratedOutfit>(query: string) {
   if (typeof window === 'undefined' || !query) return null
+  if (isAutomaticFeedQuery(query)) return null
 
   try {
     const saved = localStorage.getItem(FEED_STATE_KEY) || sessionStorage.getItem(FEED_STATE_KEY)
@@ -63,10 +72,21 @@ export function readFeedStateForQuery<TAiContext, TGeneratedOutfit>(query: strin
 }
 
 function writeFeedState<TAiContext, TGeneratedOutfit>(state: PersistedFeedState<TAiContext, TGeneratedOutfit>) {
+  if (isAutomaticFeedQuery(state.searchQuery)) return
+
   try {
     const serialized = JSON.stringify(state)
     localStorage.setItem(FEED_STATE_KEY, serialized)
     sessionStorage.setItem(FEED_STATE_KEY, serialized)
+  } catch {}
+}
+
+export function clearFeedState() {
+  if (typeof window === 'undefined') return
+
+  try {
+    localStorage.removeItem(FEED_STATE_KEY)
+    sessionStorage.removeItem(FEED_STATE_KEY)
   } catch {}
 }
 
@@ -75,7 +95,11 @@ export function readLastFeedUrl() {
 
   try {
     const url = localStorage.getItem(FEED_LAST_URL_KEY) || ''
-    return url.startsWith('/feed') ? url : ''
+    if (!url.startsWith('/feed')) return ''
+
+    const parsed = new URL(url, window.location.origin)
+    const query = parsed.searchParams.get('q') || ''
+    return isAutomaticFeedQuery(query) ? '/feed' : `${parsed.pathname}${parsed.search}`
   } catch {
     return ''
   }
@@ -85,7 +109,9 @@ export function writeLastFeedUrl(url: string) {
   if (typeof window === 'undefined' || !url.startsWith('/feed')) return
 
   try {
-    localStorage.setItem(FEED_LAST_URL_KEY, url)
+    const parsed = new URL(url, window.location.origin)
+    const query = parsed.searchParams.get('q') || ''
+    localStorage.setItem(FEED_LAST_URL_KEY, isAutomaticFeedQuery(query) ? '/feed' : url)
   } catch {}
 }
 
@@ -100,6 +126,7 @@ export function useFeedStatePersistence<TAiContext, TGeneratedOutfit>({
 }: FeedStatePersistenceParams<TAiContext, TGeneratedOutfit>) {
   const saveFeedState = () => {
     if (!searchQuery) return
+    if (isAutomaticFeedQuery(searchQuery)) return
 
     writeFeedState({
       searchQuery,
@@ -116,6 +143,7 @@ export function useFeedStatePersistence<TAiContext, TGeneratedOutfit>({
     if (!searchQuery) {
       return
     }
+    if (isAutomaticFeedQuery(searchQuery)) return
 
     if (!aiContext && chatHistory.length === 0 && !finalBanner && !generatedOutfit) return
 

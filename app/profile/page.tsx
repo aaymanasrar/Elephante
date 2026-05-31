@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase'
 import LoadingScreen from '@/app/components/LoadingScreen'
 import ParticleCanvas from '@/components/ParticleCanvas'
 import { useLocale } from '@/lib/locale-context'
+import { useTheme, type ThemePreference } from '@/lib/theme-context'
 
 // ─── Edit Sheet ───────────────────────────────────────────────────────────────
 type EditField = 'username' | 'email' | 'password' | null
@@ -162,6 +163,7 @@ function EditSheet({
 export default function ProfileDashboard() {
   const router = useRouter()
   const { lang, isAr, setLang } = useLocale()
+  const { themePreference, resolvedTheme, setThemePreference } = useTheme()
   const [loading, setLoading]       = useState(true)
   const [userEmail, setUserEmail]   = useState('')
   const [username, setUsername]     = useState('Style Icon')
@@ -180,6 +182,12 @@ export default function ProfileDashboard() {
     tapOpen: 'اضغط للفتح ←',
     aiStylist: 'AI Stylist',
     preferences: 'التفضيلات الشخصية',
+    appearance: 'المظهر',
+    appearancePrompt: 'اختر المظهر الذي يناسبك',
+    darkMode: 'داكن',
+    lightMode: 'فاتح',
+    systemMode: 'حسب الجهاز',
+    activeTheme: resolvedTheme === 'light' ? 'فاتح الآن' : 'داكن الآن',
     signOut: 'تسجيل الخروج',
   } : {
     savedItems: 'Saved Items',
@@ -190,6 +198,12 @@ export default function ProfileDashboard() {
     tapOpen: 'Tap to open →',
     aiStylist: 'AI Stylist',
     preferences: 'Personal Preferences',
+    appearance: 'Appearance',
+    appearancePrompt: 'How should Elephante look?',
+    darkMode: 'Dark',
+    lightMode: 'Light',
+    systemMode: 'System',
+    activeTheme: resolvedTheme === 'light' ? 'Using light mode' : 'Using dark mode',
     signOut: 'Sign Out',
   }
 
@@ -469,6 +483,28 @@ export default function ProfileDashboard() {
                   >
                     عربي
                   </button>
+                </div>
+              </div>
+              <div className="w-full px-4 py-4 border-t border-zinc-900">
+                <div className="mb-3">
+                  <p className="text-zinc-200 text-[13px]">{copy.appearance}</p>
+                  <p className="text-zinc-600 text-[11px] mt-0.5">{copy.appearancePrompt} · {copy.activeTheme}</p>
+                </div>
+                <div className="grid grid-cols-3 rounded-full border border-zinc-800 bg-black/30 p-1">
+                  {([
+                    { id: 'dark', label: copy.darkMode },
+                    { id: 'light', label: copy.lightMode },
+                    { id: 'system', label: copy.systemMode },
+                  ] as Array<{ id: ThemePreference; label: string }>).map((option) => (
+                    <button
+                      key={option.id}
+                      onClick={() => setThemePreference(option.id)}
+                      className={`rounded-full px-2 py-2 text-[9px] font-bold transition-all ${themePreference === option.id ? 'bg-white text-black' : 'text-zinc-500 hover:text-white'}`}
+                      type="button"
+                    >
+                      {option.label}
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>

@@ -31,10 +31,6 @@ type RawClosetItem = {
 }
 
 type PersonalCategory = 'all' | 'tops' | 'bottoms' | 'shoes' | 'outerwear' | 'accessories'
-type PersonalView = 'wardrobe' | 'dress-today'
-
-type WeatherInfo = { city: string; temperature_c: number; condition: string; wind_kph: number }
-type OutfitSuggestion = { outfit_name: string; selected_items: (RawClosetItem & { reason: string })[]; ai_verdict: string }
 
 const PERSONAL_CATEGORIES: { id: PersonalCategory; label: string; labelAr: string }[] = [
   { id: 'all', label: 'All', labelAr: 'الكل' },
@@ -43,17 +39,6 @@ const PERSONAL_CATEGORIES: { id: PersonalCategory; label: string; labelAr: strin
   { id: 'shoes', label: 'Shoes', labelAr: 'أحذية' },
   { id: 'outerwear', label: 'Outerwear', labelAr: 'طبقة خارجية' },
   { id: 'accessories', label: 'Accessories', labelAr: 'إكسسوارات' },
-]
-
-const OCCASIONS: { id: string; label: string; labelAr: string; icon: string }[] = [
-  { id: 'Casual', label: 'Casual', labelAr: 'يومي', icon: '☀️' },
-  { id: 'Office', label: 'Office', labelAr: 'مكتب', icon: '💼' },
-  { id: 'Dinner', label: 'Dinner', labelAr: 'عشاء', icon: '🍽️' },
-  { id: 'Gym', label: 'Gym', labelAr: 'رياضة', icon: '🏋️' },
-  { id: 'Date', label: 'Date', labelAr: 'موعد', icon: '❤️' },
-  { id: 'Wedding', label: 'Wedding', labelAr: 'زفاف', icon: '💍' },
-  { id: 'Travel', label: 'Travel', labelAr: 'سفر', icon: '✈️' },
-  { id: 'Beach', label: 'Beach', labelAr: 'شاطئ', icon: '🏖️' },
 ]
 
 const LIFESTYLE = [
@@ -109,22 +94,13 @@ const closetCopy = {
     emptyCuratedLooks: 'No curated Elephante looks saved',
     emptyStylistLooks: 'No AI Stylist looks saved',
     emptyPersonalLooks: 'No clothes in your wardrobe yet',
-    myWardrobe: 'My Wardrobe',
-    dressToday: 'Dress for Today',
-    categoryAll: 'All',
     selectItems: 'Select',
     cancelSelect: 'Cancel',
     buildOutfit: (n: number) => `Build Outfit (${n})`,
-    cityPlaceholder: 'Enter your city…',
-    getWeather: 'Check Weather',
-    checkingWeather: 'Checking…',
-    weatherError: 'Could not get weather.',
-    occasion: 'Occasion',
-    findOutfit: 'Find My Outfit',
-    findingOutfit: 'Styling your look…',
-    suggestError: 'Could not suggest an outfit. Try again.',
-    emptySuggest: 'Add more clothes to get outfit suggestions.',
-    todaysLook: "Today's Look",
+    buildingOutfit: 'Building...',
+    suggestionTitle: 'Elephante suggestion',
+    suggestionError: 'Could not build an outfit from your closet.',
+    dismissSuggestion: 'Dismiss suggestion',
     yourOutfits: 'Your outfits',
     yourOutfitsSub: 'Uploaded looks you can reuse as the starting point.',
     elephanteLooks: 'Elephante looks',
@@ -183,22 +159,13 @@ const closetCopy = {
     emptyCuratedLooks: 'لا توجد مختارات محفوظة من Elephante',
     emptyStylistLooks: 'لا توجد إطلالات من المنسق الذكي',
     emptyPersonalLooks: 'لا توجد ملابس في خزانتك بعد',
-    myWardrobe: 'خزانتي',
-    dressToday: 'إطلالة اليوم',
-    categoryAll: 'الكل',
     selectItems: 'تحديد',
     cancelSelect: 'إلغاء',
     buildOutfit: (n: number) => `ابنِ إطلالة (${n})`,
-    cityPlaceholder: 'أدخل مدينتك…',
-    getWeather: 'تحقق من الطقس',
-    checkingWeather: 'جارٍ التحقق…',
-    weatherError: 'تعذّر الحصول على الطقس.',
-    occasion: 'المناسبة',
-    findOutfit: 'ابحث عن إطلالتي',
-    findingOutfit: 'جارٍ تنسيق إطلالتك…',
-    suggestError: 'تعذّر اقتراح إطلالة. حاول مجدداً.',
-    emptySuggest: 'أضف المزيد من الملابس للحصول على اقتراحات.',
-    todaysLook: 'إطلالة اليوم',
+    buildingOutfit: 'جارٍ البناء...',
+    suggestionTitle: 'اقتراح Elephante',
+    suggestionError: 'لم نتمكن من بناء إطلالة من خزانتك.',
+    dismissSuggestion: 'إغلاق الاقتراح',
     yourOutfits: 'إطلالاتك',
     yourOutfitsSub: 'إطلالات رفعتها وتستطيع البناء عليها.',
     elephanteLooks: 'إطلالات Elephante',
@@ -241,6 +208,17 @@ type ImportPreview = {
   missingAnswers: Partial<Record<MissingOutfitPiece, string>>
   status: ImportStatus
   message: string
+}
+
+type ClosetSuggestionItem = RawClosetItem & {
+  reason?: string | null
+}
+
+type ClosetSuggestion = {
+  outfit_name: string
+  selected_items: ClosetSuggestionItem[]
+  ai_verdict: string
+  locked_item_ids?: number[]
 }
 
 const MAX_IMPORT_IMAGE_EDGE = 1400
@@ -396,16 +374,9 @@ export default function ClosetPage() {
   // Personal wardrobe state
   const [rawClosetItems, setRawClosetItems] = useState<RawClosetItem[]>([])
   const [personalCategory, setPersonalCategory] = useState<PersonalCategory>('all')
-  const [personalView, setPersonalView] = useState<PersonalView>('wardrobe')
   const [selectedItemIds, setSelectedItemIds] = useState<Set<number>>(new Set())
   const [selectMode, setSelectMode] = useState(false)
-
-  // Dress for Today state
-  const [cityInput, setCityInput] = useState('')
-  const [weatherData, setWeatherData] = useState<WeatherInfo | null>(null)
-  const [weatherLoading, setWeatherLoading] = useState(false)
-  const [selectedOccasion, setSelectedOccasion] = useState('Casual')
-  const [outfitSuggestion, setOutfitSuggestion] = useState<OutfitSuggestion | null>(null)
+  const [closetSuggestion, setClosetSuggestion] = useState<ClosetSuggestion | null>(null)
   const [suggestionLoading, setSuggestionLoading] = useState(false)
   const [suggestionError, setSuggestionError] = useState('')
 
@@ -660,50 +631,40 @@ export default function ClosetPage() {
     })
   }
 
-  const handleBuildOutfit = () => {
-    if (selectedItemIds.size === 0) return
-    setSelectMode(false)
-    setSelectedItemIds(new Set())
-  }
+  const handleBuildOutfit = async () => {
+    if (selectedItemIds.size === 0 || suggestionLoading) return
 
-  const fetchWeather = async () => {
-    if (!cityInput.trim()) return
-    setWeatherLoading(true)
-    try {
-      const res = await fetch(`/api/weather?city=${encodeURIComponent(cityInput.trim())}`)
-      const data = await res.json()
-      if (data.error) throw new Error(data.error)
-      setWeatherData(data as WeatherInfo)
-    } catch {
-      setWeatherData(null)
-    } finally {
-      setWeatherLoading(false)
-    }
-  }
-
-  const handleSuggestOutfit = async () => {
-    if (rawClosetItems.length === 0) return
     setSuggestionLoading(true)
     setSuggestionError('')
-    setOutfitSuggestion(null)
+    setClosetSuggestion(null)
+
     try {
       const authHeaders = await getAuthHeaders()
-      const res = await fetch('/api/outfit-suggest-from-closet', {
+      const response = await fetch('/api/outfit-suggest-from-closet', {
         method: 'POST',
         headers: { ...authHeaders, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          weather: weatherData,
-          occasion: selectedOccasion,
           closet_items: rawClosetItems,
+          selected_item_ids: Array.from(selectedItemIds),
           user_profile: profile,
           language: isAr ? 'ar' : 'en',
         }),
       })
-      const data = await res.json()
-      if (!res.ok || data.error) throw new Error(data.error || t.suggestError)
-      setOutfitSuggestion(data as OutfitSuggestion)
+
+      const data = await response.json()
+      if (!response.ok || data.error) throw new Error(data.error || t.suggestionError)
+
+      setClosetSuggestion({
+        outfit_name: typeof data.outfit_name === 'string' ? data.outfit_name : (isAr ? 'إطلالة اليوم' : "Today's Look"),
+        selected_items: Array.isArray(data.selected_items) ? data.selected_items : [],
+        ai_verdict: typeof data.ai_verdict === 'string' ? data.ai_verdict : '',
+        locked_item_ids: Array.isArray(data.locked_item_ids) ? data.locked_item_ids : Array.from(selectedItemIds),
+      })
+      setSelectMode(false)
+      setSelectedItemIds(new Set())
     } catch (err) {
-      setSuggestionError(err instanceof Error ? err.message : t.suggestError)
+      const message = err instanceof Error ? err.message : t.suggestionError
+      setSuggestionError(message)
     } finally {
       setSuggestionLoading(false)
     }
@@ -747,7 +708,8 @@ export default function ClosetPage() {
       if (!importResponse.ok || importData.error) throw new Error(importData.error || t.uploadError)
 
       if (importData.status === 'complete' && Array.isArray(importData.imported_items)) {
-        const mappedItems = importData.imported_items.map((item: any) => ({
+        const importedItems = importData.imported_items as RawClosetItem[]
+        const mappedItems: ClosetOutfit[] = importedItems.map((item) => ({
           id: `item_${item.id}`,
           image_url: item.image_url,
           outfit_name: item.item_name,
@@ -761,10 +723,13 @@ export default function ClosetPage() {
           shoes: item.category === 'shoes' ? item.item_name : null,
           outerwear: item.category === 'outerwear' ? item.item_name : null,
           accessories: item.category === 'accessories' ? item.item_name : null,
-          _closetSource: 'manual',
+          _closetSource: 'manual' as const,
         }))
 
+        setRawClosetItems((prev) => [...importedItems, ...prev])
         setAllOutfits((prev) => [...mappedItems, ...prev])
+        setClosetSuggestion(null)
+        setSuggestionError('')
         setSearchQuery('')
         setActiveLifestyles([])
         setActiveAesthetics([])
@@ -843,6 +808,71 @@ export default function ClosetPage() {
     return t.curatedSource
   }
 
+  const renderClosetSuggestion = () => {
+    if (!suggestionLoading && !suggestionError && !closetSuggestion) return null
+
+    return (
+      <div className="rounded-xl border border-white/10 bg-zinc-950/70 p-3 shadow-[0_18px_48px_rgba(0,0,0,0.35)]">
+        {suggestionLoading ? (
+          <div className="flex items-center gap-2 py-2">
+            <span className="h-4 w-4 rounded-full border border-white/20 border-t-white animate-spin" />
+            <p className="text-[10px] uppercase tracking-[0.24em] text-zinc-400">{t.buildingOutfit}</p>
+          </div>
+        ) : suggestionError ? (
+          <p className="text-[10px] leading-relaxed text-red-300">{suggestionError}</p>
+        ) : closetSuggestion ? (
+          <div className="space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[8px] uppercase tracking-[0.24em] text-zinc-600">{t.suggestionTitle}</p>
+                <h3 className="mt-1 truncate text-sm font-medium text-white">{closetSuggestion.outfit_name}</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setClosetSuggestion(null)}
+                className="shrink-0 text-zinc-600 hover:text-white transition-colors"
+                aria-label={t.dismissSuggestion}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {closetSuggestion.ai_verdict ? (
+              <p className="text-[11px] leading-relaxed text-zinc-400">{closetSuggestion.ai_verdict}</p>
+            ) : null}
+
+            {closetSuggestion.selected_items.length ? (
+              <div className="grid grid-cols-3 gap-2">
+                {closetSuggestion.selected_items.map((item) => {
+                  const label = item.item_name || (isAr ? 'قطعة' : 'Item')
+                  return (
+                    <div key={`${item.id}-${label}`} className="min-w-0">
+                      <div className="aspect-[3/4] overflow-hidden rounded-lg bg-white">
+                        {item.image_url ? (
+                          <img src={item.image_url} alt={label} className="h-full w-full object-contain p-1.5" loading="lazy" />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center bg-zinc-950 text-[8px] uppercase tracking-widest text-zinc-700">
+                            {t.noImage}
+                          </div>
+                        )}
+                      </div>
+                      <p className="mt-1 truncate text-[9px] text-zinc-300">{label}</p>
+                      {item.reason ? (
+                        <p className="mt-0.5 line-clamp-2 text-[8px] leading-snug text-zinc-600">{item.reason}</p>
+                      ) : null}
+                    </div>
+                  )
+                })}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    )
+  }
+
   const renderWardrobeView = () => {
     const catCounts: Record<string, number> = { all: rawClosetItems.length }
     for (const item of rawClosetItems) {
@@ -885,6 +915,8 @@ export default function ClosetPage() {
           </button>
         </div>
 
+        {renderClosetSuggestion()}
+
         {/* Catalog grid */}
         <div className="grid grid-cols-3 gap-2">
           {renderPersonalUploadCard()}
@@ -898,7 +930,10 @@ export default function ClosetPage() {
                 className="group cursor-pointer"
                 onClick={() => {
                   if (selectMode) toggleItemSelection(item.id)
-                  else toggleItemSelection(item.id)
+                  else {
+                    setSelectMode(true)
+                    toggleItemSelection(item.id)
+                  }
                 }}
               >
                 <div className={`relative w-full aspect-[3/4] overflow-hidden rounded-2xl bg-white transition-all duration-200 ${
@@ -963,9 +998,10 @@ export default function ClosetPage() {
           <div className="sticky bottom-24 z-30 flex justify-center pt-2">
             <button
               onClick={handleBuildOutfit}
-              className="h-12 px-6 bg-white text-black rounded-2xl text-[10px] font-extrabold uppercase tracking-widest shadow-[0_8px_32px_rgba(0,0,0,0.6)] hover:bg-zinc-100 active:scale-[0.97] transition-all"
+              disabled={suggestionLoading}
+              className="h-12 px-6 bg-white text-black rounded-2xl text-[10px] font-extrabold uppercase tracking-widest shadow-[0_8px_32px_rgba(0,0,0,0.6)] hover:bg-zinc-100 active:scale-[0.97] transition-all disabled:cursor-wait disabled:opacity-70"
             >
-              {t.buildOutfit(selectedItemIds.size)}
+              {suggestionLoading ? t.buildingOutfit : t.buildOutfit(selectedItemIds.size)}
             </button>
           </div>
         ) : null}
@@ -973,147 +1009,7 @@ export default function ClosetPage() {
     )
   }
 
-  const renderDressForTodayView = () => {
-    const conditionIcon = !weatherData ? null
-      : /rain/i.test(weatherData.condition) ? '🌧️'
-      : /cloud/i.test(weatherData.condition) ? '☁️'
-      : /snow/i.test(weatherData.condition) ? '❄️'
-      : /thunder/i.test(weatherData.condition) ? '⛈️'
-      : /fog|mist/i.test(weatherData.condition) ? '🌫️'
-      : '☀️'
-
-    return (
-      <div className="space-y-5">
-        {/* City / weather */}
-        <div className="space-y-2">
-          <p className="text-[9px] uppercase tracking-[0.25em] text-zinc-600">{isAr ? '📍 مدينتك' : '📍 Your City'}</p>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={cityInput}
-              onChange={(e) => setCityInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && void fetchWeather()}
-              placeholder={t.cityPlaceholder}
-              dir={isAr ? 'rtl' : 'ltr'}
-              className={`flex-1 bg-zinc-900/80 border border-zinc-800 text-white placeholder-zinc-700 text-sm rounded-xl py-2.5 outline-none focus:border-white/30 transition-all ${isAr ? 'pr-4 text-right' : 'pl-4'}`}
-            />
-            <button
-              onClick={() => void fetchWeather()}
-              disabled={!cityInput.trim() || weatherLoading}
-              className="h-10 px-4 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl text-[9px] font-bold uppercase tracking-widest disabled:opacity-40 transition-colors flex-shrink-0"
-            >
-              {weatherLoading ? t.checkingWeather : t.getWeather}
-            </button>
-          </div>
-          {weatherData ? (
-            <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-zinc-900/60 border border-zinc-800">
-              <span className="text-2xl">{conditionIcon}</span>
-              <div>
-                <p className="text-white text-sm font-semibold">{weatherData.city}</p>
-                <p className="text-zinc-400 text-[11px]">{weatherData.temperature_c}°C · {weatherData.condition}</p>
-              </div>
-            </div>
-          ) : null}
-        </div>
-
-        {/* Occasion */}
-        <div className="space-y-2">
-          <p className="text-[9px] uppercase tracking-[0.25em] text-zinc-600">{t.occasion}</p>
-          <div className="flex flex-wrap gap-2">
-            {OCCASIONS.map((occ) => (
-              <button
-                key={occ.id}
-                onClick={() => setSelectedOccasion(occ.id)}
-                className={`flex items-center gap-1.5 h-9 px-3 rounded-full text-[9px] font-bold uppercase tracking-widest transition-all duration-200 border ${
-                  selectedOccasion === occ.id
-                    ? 'bg-white text-black border-white'
-                    : 'bg-transparent border-zinc-800 text-zinc-500 hover:border-zinc-600 hover:text-zinc-300'
-                }`}
-              >
-                <span>{occ.icon}</span>
-                {isAr ? occ.labelAr : occ.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* CTA */}
-        <button
-          onClick={() => void handleSuggestOutfit()}
-          disabled={suggestionLoading || rawClosetItems.length === 0}
-          className="w-full h-12 bg-white hover:bg-zinc-100 text-black rounded-2xl text-[10px] font-extrabold uppercase tracking-widest flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-40"
-        >
-          {suggestionLoading ? (
-            <>
-              <span className="w-3.5 h-3.5 border-2 border-zinc-400 border-t-zinc-800 rounded-full animate-spin" />
-              {t.findingOutfit}
-            </>
-          ) : (
-            <>✨ {rawClosetItems.length === 0 ? t.emptySuggest : t.findOutfit}</>
-          )}
-        </button>
-
-        {suggestionError ? (
-          <p className="text-[10px] text-red-400 text-center">{suggestionError}</p>
-        ) : null}
-
-        {/* Suggestion result */}
-        {outfitSuggestion ? (
-          <div className="space-y-4 animate-in fade-in slide-in-from-bottom-3 duration-500">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-[10px] uppercase tracking-[0.3em] text-zinc-300">{outfitSuggestion.outfit_name || t.todaysLook}</p>
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              {outfitSuggestion.selected_items.map((item) => (
-                <div key={item.id} className="space-y-1.5">
-                  <div className="relative w-full aspect-[3/4] overflow-hidden rounded-xl bg-zinc-900 border border-zinc-700">
-                    {item.image_url ? (
-                      <img src={item.image_url} alt={item.item_name || ''} className="w-full h-full object-contain p-1" loading="lazy" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-zinc-700 text-[9px]">—</div>
-                    )}
-                    <div className="absolute bottom-0 left-0 right-0 px-1.5 py-1 bg-gradient-to-t from-black/80 to-transparent">
-                      <p className="text-[7px] uppercase tracking-widest text-zinc-400">{item.category}</p>
-                    </div>
-                  </div>
-                  <p className="text-[8px] text-zinc-400 truncate">{item.item_name}</p>
-                  {item.reason ? (
-                    <p className="text-[8px] text-zinc-700 leading-tight line-clamp-2">{item.reason}</p>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-            {outfitSuggestion.ai_verdict ? (
-              <div className="px-4 py-3 rounded-2xl bg-zinc-900/60 border border-zinc-800">
-                <p className="text-[11px] text-zinc-300 leading-relaxed">{outfitSuggestion.ai_verdict}</p>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-    )
-  }
-
-  const renderPersonalSection = () => (
-    <div className="space-y-4">
-      {/* Sub-tab toggle: My Wardrobe / Dress for Today */}
-      <div className="flex gap-1 p-1 bg-zinc-900/60 rounded-2xl border border-zinc-800">
-        <button
-          onClick={() => setPersonalView('wardrobe')}
-          className={`flex-1 py-2.5 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all duration-200 ${personalView === 'wardrobe' ? 'bg-white text-black shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
-        >
-          {t.myWardrobe}
-        </button>
-        <button
-          onClick={() => { setPersonalView('dress-today'); setSelectMode(false); setSelectedItemIds(new Set()) }}
-          className={`flex-1 py-2.5 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all duration-200 ${personalView === 'dress-today' ? 'bg-white text-black shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
-        >
-          {t.dressToday}
-        </button>
-      </div>
-      {personalView === 'wardrobe' ? renderWardrobeView() : renderDressForTodayView()}
-    </div>
-  )
+  const renderPersonalSection = () => renderWardrobeView()
 
   const renderPersonalUploadCard = () => {
     const previewUrl = importPreview.mannequinUrl || importPreview.originalUrl

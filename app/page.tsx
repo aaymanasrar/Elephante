@@ -193,11 +193,37 @@ export default function Home() {
 
   const arabicFont = { fontFamily: "'Noto Naskh Arabic', serif" }
 
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Elephante",
+    "url": "https://elephante.app",
+    "operatingSystem": "All",
+    "applicationCategory": "LifestyleApplication",
+    "offers": {
+      "@type": "Offer",
+      "price": "0.00",
+      "priceCurrency": "USD"
+    },
+    "description": "Your intelligent wardrobe archive. Curate, search, and elevate your personal style with AI outfit recommendations and styling analysis in English & Arabic.",
+    "featureList": [
+      "AI outfit generator",
+      "Digital wardrobe archive",
+      "Outfit style analysis",
+      "Occasion-based styling",
+      "Arabic and English support"
+    ]
+  }
+
   return (
     <div
       className="min-h-screen bg-black text-white overflow-y-auto selection:bg-zinc-800"
       dir={isAr ? 'rtl' : 'ltr'}
     >
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
       {/* ── HERO ─────────────────────────────────────────────────── */}
       <main className="relative h-screen flex flex-col items-center justify-center overflow-hidden">
         <LanguageToggle />
@@ -220,7 +246,7 @@ export default function Home() {
             size={180}
             decorative
             opacity={logoFaded ? 0.05 : 0.75}
-            className="transition-opacity duration-[1600ms] ease-[cubic-bezier(0.22,1,0.36,1)]"
+            className="transition-opacity duration-[1600ms] ease-[cubic-bezier(0.22,1,0.36,1)] text-zinc-500"
             priority
           />
         </div>

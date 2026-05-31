@@ -1,9 +1,15 @@
 'use client'
 
+export interface WeatherContext {
+  city: string
+  temperature_c: number
+  condition: string
+  wind_kph?: number
+}
+
 interface OutfitSearchParams {
   chatHistory: Array<{ role: 'user' | 'assistant'; content: string }>
   displayName: string
-  serializedOutfits: Array<Record<string, unknown>>
   query: string
   userBodyShape: string
   userGender: string
@@ -11,6 +17,7 @@ interface OutfitSearchParams {
   userSkinTone: string
   userStylePref: string
   language?: 'en' | 'ar'
+  weather?: WeatherContext | null
 }
 
 interface OutfitGenerationParams {
@@ -22,19 +29,20 @@ interface OutfitGenerationParams {
   userStylePref: string
   avatar_url?: string
   language?: 'en' | 'ar'
+  weather?: WeatherContext | null
 }
 
 export async function requestOutfitSearch({
   chatHistory,
   displayName,
   query,
-  serializedOutfits,
   userBodyShape,
   userGender,
   userHeight,
   userSkinTone,
   userStylePref,
   language,
+  weather,
 }: OutfitSearchParams, signal: AbortSignal) {
   const response = await fetch('/api/outfit-search', {
     method: 'POST',
@@ -49,12 +57,15 @@ export async function requestOutfitSearch({
       height: userHeight,
       style_pref: userStylePref,
       history: chatHistory,
-      outfits: serializedOutfits,
       language,
+      weather,
     }),
   })
-  if (!response.ok) throw new Error(`outfit-search failed (${response.status})`)
-  return response.json()
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(typeof data?.error === 'string' ? data.error : `outfit-search failed (${response.status})`)
+  }
+  return data
 }
 
 export async function requestOutfitGeneration({
@@ -66,6 +77,7 @@ export async function requestOutfitGeneration({
   userStylePref,
   avatar_url,
   language,
+  weather,
 }: OutfitGenerationParams, signal: AbortSignal) {
   const response = await fetch('/api/outfit-generate', {
     method: 'POST',
@@ -80,8 +92,12 @@ export async function requestOutfitGeneration({
       style_pref: userStylePref,
       avatar_url,
       language,
+      weather,
     }),
   })
-  if (!response.ok) throw new Error(`outfit-generate failed (${response.status})`)
-  return response.json()
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(typeof data?.error === 'string' ? data.error : `outfit-generate failed (${response.status})`)
+  }
+  return data
 }

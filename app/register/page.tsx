@@ -207,12 +207,15 @@ export default function Register() {
 
           {/* ── Brand ── */}
           <div className="flex flex-col items-center mb-10">
-            <h1
+            <h1 className="sr-only">
+              {isAr ? 'إنشاء حساب Elephante' : 'Create an Elephante Account'}
+            </h1>
+            <div
               className="font-bold uppercase tracking-[0.3em] sm:tracking-[0.4em] text-zinc-500"
               style={{ fontSize: '13px' }}
             >
               Elephante
-            </h1>
+            </div>
             <img
               src="/logo.png.png"
               alt="Elephante"

@@ -7,10 +7,10 @@ export default function Loading() {
     <div className="fixed inset-0 bg-black flex items-center justify-center z-50">
       <div className="relative w-24 h-24" aria-label="Loading">
         <div className="absolute inset-0">
-          <Logo size={96} opacity={0.2} decorative className="w-full h-full" />
+          <Logo size={96} opacity={0.2} decorative className="w-full h-full text-zinc-500" />
         </div>
         <div className="absolute inset-0 animate-fill overflow-hidden">
-          <Logo size={96} decorative className="w-full h-full" />
+          <Logo size={96} decorative className="w-full h-full text-zinc-500" />
         </div>
       </div>
 

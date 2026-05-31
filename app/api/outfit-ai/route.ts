@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { chatWithFallback, extractJSON } from '@/services/aiProviders'
 import { searchProducts, type Product } from '@/services/productSearch'
 import { rateLimit } from '@/lib/rateLimit'
+import { buildLocalAiStylistOutfits } from '@/lib/stylistFallback'
 
 // ─── Fashion Intelligence System Prompt ───────────────────────────────────────
 const SYSTEM_PROMPT = `
@@ -354,19 +355,30 @@ RULES:
 - Prioritize wearability over complexity. The best outfit is one they'll actually put on.
 `.trim()
 
-    const response = await chatWithFallback(
-      [
-        { role: 'system', content: SYSTEM_PROMPT },
-        {
-          role: 'user',
-          content: `Generate 3 personalized outfit suggestions for this user. Apply all fashion rules.\n\nReturn ONLY a raw JSON object — no markdown, no code blocks, no explanation. Start your response with { and end with }.\n\n${userContext}`,
-        },
-      ],
-      { temperature: 0.8 }
-    )
+    let outfits: any[] = []
 
-    const parsed = extractJSON(response.content)
-    const outfits: any[] = Array.isArray(parsed) ? parsed : (parsed.outfits || [])
+    try {
+      const response = await chatWithFallback(
+        [
+          { role: 'system', content: SYSTEM_PROMPT },
+          {
+            role: 'user',
+            content: `Generate 3 personalized outfit suggestions for this user. Apply all fashion rules.\n\nReturn ONLY a raw JSON object — no markdown, no code blocks, no explanation. Start your response with { and end with }.\n\n${userContext}`,
+          },
+        ],
+        { temperature: 0.8 }
+      )
+
+      const parsed = extractJSON(response.content)
+      outfits = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.outfits) ? parsed.outfits : [])
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      console.warn('[outfit-ai] local stylist fallback:', message)
+    }
+
+    if (!outfits.length) {
+      outfits = buildLocalAiStylistOutfits({ profile, occasion, mood, season, language, weather })
+    }
 
     // ── Enrich pieces with real product data from brand APIs ──────────────────
     const gender = profile?.gender || 'male'

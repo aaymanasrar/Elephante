@@ -54,6 +54,9 @@ Common AI / server-side keys used by routes and scripts:
 
 Optional wardrobe image cleanup:
 
+- `PHOTOROOM_API_KEY` — uses PhotoRoom for wardrobe cutouts. Single garment uploads use the Remove Background API; full outfit imports use PhotoRoom Image Editing segmentation when individual garments need to be isolated.
+- `PHOTOROOM_TIMEOUT_MS` — defaults to `60000`
+- `PHOTOROOM_REMOVE_BACKGROUND_SIZE` — optional PhotoRoom Remove Background size: `preview`, `medium`, `hd`, or `full`; defaults to `full`
 - `SAM_SEGMENTATION_URL` — optional clothing cutout service endpoint; Elephante sends multipart `image` and accepts an image response or JSON containing `image_base64`, `image`, `data_url`, `url`, or `output`
 - `SAM_SEGMENTATION_TIMEOUT_MS` — defaults to `90000`
 - `WARDROBE_BACKGROUND_REMOVAL_MODEL` — local no-key background-removal model: `small`, `medium`, or `large`; defaults to `medium`

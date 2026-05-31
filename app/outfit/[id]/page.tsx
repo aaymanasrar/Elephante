@@ -1,7 +1,7 @@
 'use client'
 
 import Image from 'next/image'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import LoadingScreen from '@/app/components/LoadingScreen'
@@ -208,6 +208,9 @@ interface AnalysisState {
   vibe?: string
   style?: string
   color_scheme?: string
+  overall_verdict?: string
+  silhouette_feedback?: string
+  skin_tone_feedback?: string
   why_it_works?: string
   styling_tip?: string
   key_colors?: string[]
@@ -215,6 +218,103 @@ interface AnalysisState {
   color_names?: string[]
   occasions?: string[]
   occasion?: string
+}
+
+function decodeJsonString(value: string) {
+  try {
+    return JSON.parse(`"${value.replace(/"/g, '\\"')}"`) as string
+  } catch {
+    return value.replace(/\\"/g, '"').replace(/\\n/g, ' ').trim()
+  }
+}
+
+function readJsonishString(raw: string, key: string) {
+  const match = raw.match(new RegExp(`"${key}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`))
+  return match?.[1] ? decodeJsonString(match[1]).trim() : ''
+}
+
+function readJsonishStringArray(raw: string, key: string) {
+  const fieldStart = raw.match(new RegExp(`"${key}"\\s*:\\s*\\[([\\s\\S]*)`))
+  if (!fieldStart?.[1]) return []
+
+  const body = fieldStart[1].split(/\]\s*,\s*"/)[0] || ''
+  return Array.from(body.matchAll(/"((?:\\.|[^"\\])*)"/g))
+    .map((match) => decodeJsonString(match[1] || '').trim())
+    .filter(Boolean)
+}
+
+function isJsonishText(value?: string | null) {
+  const trimmed = value?.trim() || ''
+  return trimmed.startsWith('{') || trimmed.includes('"outfit_name"') || trimmed.includes('"why_it_works"')
+}
+
+function tryParseAnalysisText(value?: string | null): Partial<AnalysisState> | null {
+  const trimmed = value?.trim()
+  if (!trimmed || !isJsonishText(trimmed)) return null
+
+  const parseCandidates = [
+    trimmed,
+    trimmed.match(/\{[\s\S]*\}/)?.[0],
+  ].filter((candidate): candidate is string => Boolean(candidate))
+
+  for (const candidate of parseCandidates) {
+    try {
+      const parsed = JSON.parse(candidate) as unknown
+      if (parsed && typeof parsed === 'object') return parsed as Partial<AnalysisState>
+    } catch {}
+  }
+
+  const recovered: Partial<AnalysisState> = {}
+  for (const key of ['outfit_name', 'style', 'vibe', 'color_scheme', 'why_it_works', 'styling_tip', 'overall_verdict', 'silhouette_feedback', 'skin_tone_feedback'] as const) {
+    const valueForKey = readJsonishString(trimmed, key)
+    if (valueForKey) recovered[key] = valueForKey
+  }
+
+  const occasions = readJsonishStringArray(trimmed, 'occasions')
+  const pieces = readJsonishStringArray(trimmed, 'pieces')
+  const colorNames = readJsonishStringArray(trimmed, 'color_names')
+  const keyColors = readJsonishStringArray(trimmed, 'key_colors').filter((hex) => /^#[0-9a-f]{6}$/i.test(hex))
+
+  if (occasions.length) recovered.occasions = occasions
+  if (pieces.length) recovered.pieces = pieces
+  if (colorNames.length) recovered.color_names = colorNames
+  if (keyColors.length) recovered.key_colors = keyColors
+
+  return Object.keys(recovered).length ? recovered : null
+}
+
+function firstCleanText(...values: Array<string | null | undefined>) {
+  return values.find((value) => typeof value === 'string' && value.trim() && !isJsonishText(value))?.trim() || ''
+}
+
+function buildReadableDetails(analysis: Partial<AnalysisState>) {
+  const direct = firstCleanText(analysis.why_it_works, analysis.overall_verdict)
+  if (direct) return direct
+
+  const parts = [
+    firstCleanText(analysis.color_scheme),
+    Array.isArray(analysis.occasions) && analysis.occasions.length
+      ? `Works for ${analysis.occasions.slice(0, 3).join(', ')}.`
+      : '',
+    Array.isArray(analysis.pieces) && analysis.pieces.length
+      ? `Visible pieces: ${analysis.pieces.slice(0, 4).join(', ')}.`
+      : '',
+  ].filter(Boolean)
+
+  return parts.join(' ')
+}
+
+function normalizeAnalysisForDisplay(input: AnalysisState): AnalysisState {
+  const parsed = tryParseAnalysisText(input.why_it_works) || tryParseAnalysisText(input.styling_tip)
+  const merged = parsed ? { ...input, ...parsed } : input
+  const readableDetails = buildReadableDetails(merged) || buildReadableDetails(input)
+  const readableTip = firstCleanText(merged.styling_tip, input.styling_tip)
+
+  return {
+    ...merged,
+    why_it_works: readableDetails || undefined,
+    styling_tip: readableTip || undefined,
+  }
 }
 
 function OutfitHeroImage({ outfit, title }: { outfit: Outfit; title: string }) {
@@ -469,7 +569,7 @@ export default function OutfitDetail() {
         return
       }
 
-      const nextAnalysis = data.analysis as AnalysisState
+      const nextAnalysis = normalizeAnalysisForDisplay(data.analysis as AnalysisState)
       setAnalysis(nextAnalysis)
 
       if (source === 'db' && outfit.id) {

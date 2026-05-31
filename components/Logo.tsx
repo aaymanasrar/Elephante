@@ -1,6 +1,7 @@
 'use client'
 
 import Image from 'next/image'
+import { useTheme } from '@/lib/theme-context'
 
 interface LogoProps {
   size?: number
@@ -17,22 +18,29 @@ export default function Logo({
   decorative = false,
   priority = false,
 }: LogoProps) {
+  const { resolvedTheme } = useTheme()
+
   return (
-    <Image
-      src="/logo.png.png"
-      alt={decorative ? '' : 'Elephante'}
-      aria-hidden={decorative}
-      priority={priority}
-      width={size}
-      height={size}
+    <div
       className={className}
+      aria-hidden={decorative}
+      aria-label={decorative ? undefined : 'Elephante'}
       style={{
         width: `${size}px`,
         height: `${size}px`,
-        objectFit: 'contain',
         opacity,
-        filter: 'invert(1)',
+        backgroundColor: 'currentColor',
+        WebkitMaskImage: 'url(/logo.png.png)',
+        WebkitMaskSize: 'contain',
+        WebkitMaskRepeat: 'no-repeat',
+        WebkitMaskPosition: 'center',
+        maskImage: 'url(/logo.png.png)',
+        maskSize: 'contain',
+        maskRepeat: 'no-repeat',
+        maskPosition: 'center',
+        display: 'inline-block',
       }}
     />
   )
 }
+

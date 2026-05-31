@@ -1,29 +1,26 @@
 'use client'
 
 import Image from 'next/image'
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import LoadingScreen from '@/app/components/LoadingScreen'
 import IntroTour from '@/app/components/IntroTour'
 import FeedHeader from '@/app/feed/components/FeedHeader'
+import FeedOutfitCard from '@/app/feed/components/FeedOutfitCard'
 import OutfitAnalysisCard from '@/app/feed/components/OutfitAnalysisCard'
 import SearchFooter from '@/app/feed/components/SearchFooter'
 import LoadingSpinner from '@/components/LoadingSpinner'
 import ParticleCanvas from '@/components/ParticleCanvas'
-import { getBoostedOutfits, saveSearchClick } from '@/lib/feedSearchMemory'
-import { scoreOutfit } from '@/lib/feedMatching'
 import { feedTranslations } from '@/data/translations'
 import { useLocale } from '@/lib/locale-context'
-import { searchOutfits } from '@/lib/searchOutfits'
 import { useKeyboardOffset } from '@/hooks/useFeedUi'
-import { writeLastFeedUrl } from '@/hooks/useFeedStatePersistence'
+import { clearFeedState, isAutomaticFeedQuery, writeLastFeedUrl } from '@/hooks/useFeedStatePersistence'
 import { useElephanteData } from '@/hooks/useElephanteData'
 import { useFeedSearch } from '@/hooks/useFeedSearch'
 import { useWardrobeAttachment, type WardrobeAttachment } from '@/hooks/useWardrobeAttachment'
 import { useRequireUser } from '@/hooks/useRequireUser'
 import { useArabicTranslations } from '@/hooks/useArabicTranslations'
 import { canUseNextImage } from '@/lib/image'
-import type { Outfit } from '@/types/outfit'
 
 const EN = 'What shall we dress you for today?'
 const AR = '\u0628\u0645\u0627\u0630\u0627 \u0646\u064f\u0644\u0628\u0633\u0643 \u0627\u0644\u064a\u0648\u0645\u061f'
@@ -77,15 +74,6 @@ function TypewriterText({ text, speed = 18 }: { text: string; speed?: number }) 
   )
 }
 
-function getOutfitGender(outfit: Outfit): 'male' | 'female' | 'unisex' {
-  const aesthetic = (outfit.aesthetic || '').toLowerCase()
-  const code = (outfit.outfit_code || '').toUpperCase()
-
-  if (aesthetic.includes('female') || /^F(BC|F|SC)/.test(code)) return 'female'
-  if (aesthetic.includes('male') || /^(TH|WS|WB|M(BC|F|SC))/.test(code)) return 'male'
-  return 'unisex'
-}
-
 function isNaturalQuery(query: string) {
   const lower = query.trim().toLowerCase()
   if (!lower) return false
@@ -95,38 +83,6 @@ function isNaturalQuery(query: string) {
   if (words.length >= 2 && words.some((word) => NL_SIGNALS.includes(word))) return true
   if (words.length >= 4) return true
   return words.some((word) => NL_SIGNALS.includes(word))
-}
-
-function OutfitCardImage({ outfit, alt, noImageLabel }: { outfit: Outfit; alt: string; noImageLabel: string }) {
-  if (!outfit.image_url) {
-    return (
-      <div className="w-full h-full flex items-center justify-center">
-        <span className="text-zinc-800 text-[9px] uppercase tracking-widest">{noImageLabel}</span>
-      </div>
-    )
-  }
-
-  if (canUseNextImage(outfit.image_url)) {
-    return (
-      <Image
-        src={outfit.image_url}
-        alt={alt}
-        fill
-        unoptimized
-        sizes="(max-width: 768px) 50vw, 33vw"
-        className="w-full h-full object-cover object-top opacity-75 group-hover:opacity-100 transition-opacity duration-400"
-      />
-    )
-  }
-
-  return (
-    <img
-      src={outfit.image_url}
-      alt={alt}
-      className="w-full h-full object-cover object-top opacity-75 group-hover:opacity-100 transition-opacity duration-400"
-      loading="lazy"
-    />
-  )
 }
 
 function GeneratedOutfitImage({
@@ -178,6 +134,12 @@ type FeedChatTurn = {
   content: string
   display?: 'analysis-card'
   imagePreview?: string
+}
+type WeatherInfo = {
+  city: string
+  temperature_c: number
+  condition: string
+  wind_kph?: number
 }
 type AttachmentAnalysisMode = 'inventory' | 'rating'
 type AttachmentVisionMode = AttachmentAnalysisMode | 'question'
@@ -357,7 +319,8 @@ function FeedContent() {
   const searchParams = useSearchParams()
   const { lang, isAr } = useLocale()
   const { loading: authLoading } = useRequireUser('/login')
-  const initialQuery = searchParams?.get('q') || ''
+  const rawInitialQuery = searchParams?.get('q') || ''
+  const initialQuery = isAutomaticFeedQuery(rawInitialQuery) ? '' : rawInitialQuery
   const replaceUrl = useCallback((url: string) => {
     router.replace(url, { scroll: false })
   }, [router])
@@ -375,13 +338,12 @@ function FeedContent() {
   const [attachmentTurns, setAttachmentTurns] = useState<FeedChatTurn[]>(restoredAttachmentState?.attachmentTurns || [])
   const [isAnalyzingAttachment, setIsAnalyzingAttachment] = useState(false)
   const [isDraggingPhoto, setIsDraggingPhoto] = useState(false)
+  const [weatherData, setWeatherData] = useState<WeatherInfo | null>(null)
+  const weatherFetchedRef = useRef(false)
   const prevHistoryLenRef = useRef(0)
   const dragDepthRef = useRef(0)
   const chatEndRef = useRef<HTMLDivElement>(null)
-  const didAutoCurate = useRef(false)
   const {
-    allOutfits,
-    allOutfitsRef,
     displayName,
     loading,
     showTour,
@@ -389,12 +351,38 @@ function FeedContent() {
     userGender,
     userHeight,
     userId,
-    userPalettes,
     userSkinTone,
     userStylePref,
     userAvatarUrl,
     setShowTour,
   } = useElephanteData(() => router.push('/login'))
+
+  const fetchWeatherForLocation = useCallback(async () => {
+    if (!navigator.geolocation) return
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          const { latitude: lat, longitude: lon } = position.coords
+          const response = await fetch('/api/weather', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ lat, lon }),
+          })
+          if (!response.ok) return
+          const data = await response.json().catch(() => ({}))
+          if (data?.error) return
+          setWeatherData({
+            city: String(data.city || 'Your location'),
+            temperature_c: Number(data.temperature_c),
+            condition: String(data.condition || ''),
+            wind_kph: Number.isFinite(Number(data.wind_kph)) ? Number(data.wind_kph) : undefined,
+          })
+        } catch {}
+      },
+      () => {}, // permission denied — silent
+      { timeout: 8000 },
+    )
+  }, [])
 
   const {
     aiContext,
@@ -415,10 +403,7 @@ function FeedContent() {
     setSearchQuery,
     triggerCuration,
   } = useFeedSearch({
-    allOutfits,
-    allOutfitsRef,
     displayName,
-    getOutfitGender,
     initialQuery,
     isNaturalQuery,
     onNavigateToLogin: () => router.push('/login'),
@@ -432,15 +417,15 @@ function FeedContent() {
     userStylePref,
     userAvatarUrl,
     language: lang,
+    weather: weatherData,
     ready: !loading && !authLoading,
   })
 
   useEffect(() => {
-    if (didAutoCurate.current || loading || authLoading || !userId || initialQuery) return
-    didAutoCurate.current = true
-    setSearchQuery(isAr ? 'اقترح لي إطلالات اليوم' : 'suggest outfits for me today')
-    triggerCuration()
-  }, [loading, authLoading, userId, initialQuery, isAr, setSearchQuery, triggerCuration])
+    if (!isAutomaticFeedQuery(rawInitialQuery)) return
+    clearFeedState()
+    replaceUrl('/feed')
+  }, [rawInitialQuery, replaceUrl])
 
   const {
     attachFile,
@@ -470,6 +455,23 @@ function FeedContent() {
       clearActiveSearchState()
     }
   )
+
+  useEffect(() => {
+    if (!isAutomaticFeedQuery(searchQuery)) return
+
+    clearFeedState()
+    setInputValue('')
+    setSearchQuery('')
+    setPendingUserMessage('')
+    setChipDisplayMap({})
+    setAttachmentAnalysis(null)
+    setAttachmentAnalysisMode(null)
+    setAttachmentChat(null)
+    setAttachmentSuggestions([])
+    setAttachmentTurns([])
+    clearActiveSearchState()
+    replaceUrl('/feed')
+  }, [searchQuery, clearActiveSearchState, replaceUrl, setInputValue, setSearchQuery])
 
   useEffect(() => {
     writeLastFeedUrl(`${window.location.pathname}${window.location.search}`)
@@ -740,46 +742,27 @@ function FeedContent() {
     void handleAnalyzeAttachment(question, 'question')
   }, [handleAnalyzeAttachment])
 
-  const boostedIds = useMemo(() => aiContext?.intent ? getBoostedOutfits(aiContext.intent) : [], [aiContext?.intent])
   const noImageLabel = isAr ? 'لا توجد صورة' : 'No image'
-
-  const genderFiltered = useMemo(() => {
-    return allOutfits.filter((item) => {
-      const outfitGender = getOutfitGender(item)
-      return outfitGender === 'unisex' || outfitGender === userGender
-    })
-  }, [allOutfits, userGender])
-
-  const sortedFeed = useMemo(() => {
-    return [...genderFiltered].sort(
-      (a, b) => scoreOutfit(b, userSkinTone, userPalettes, userBodyShape) - scoreOutfit(a, userSkinTone, userPalettes, userBodyShape)
-    )
-  }, [genderFiltered, userSkinTone, userPalettes, userBodyShape])
-
-  const filteredOutfits: Outfit[] = useMemo(() => {
-    if (!searchQuery) return []
-    if (aiContext?.suggestions?.length) {
-      return aiContext.suggestions
-        .map((suggestion) => genderFiltered.find((outfit) => String(outfit.id) === String(suggestion.outfit_id)))
-        .filter((outfit): outfit is Outfit => Boolean(outfit))
-    }
-    if (aiContext) return []
-    return searchOutfits(genderFiltered, searchQuery).sort((a, b) => {
-      const aScore = (boostedIds.includes(String(a.id)) ? 10 : 0) + scoreOutfit(a, userSkinTone, userPalettes, userBodyShape)
-      const bScore = (boostedIds.includes(String(b.id)) ? 10 : 0) + scoreOutfit(b, userSkinTone, userPalettes, userBodyShape)
-      return bScore - aScore
-    })
-  }, [searchQuery, aiContext, sortedFeed, genderFiltered, boostedIds, userSkinTone, userPalettes, userBodyShape])
 
   const isAttachmentAnalysisOpen = isAnalyzingAttachment || attachmentTurns.length > 0 || Boolean(attachmentAnalysis || attachmentChat)
   const isSearchSurfaceOpen = isSearching || isAttachmentAnalysisOpen
+
+  // Request geolocation once the app is ready — triggers the browser permission prompt on first visit
+  useEffect(() => {
+    if (loading || authLoading || weatherFetchedRef.current) return
+    weatherFetchedRef.current = true
+    void fetchWeatherForLocation()
+  }, [loading, authLoading, fetchWeatherForLocation])
+
   const visibleChatHistory: FeedChatTurn[] = attachmentTurns.length > 0 ? attachmentTurns : chatHistory
+  const weatherDisplay = weatherData
+    ? `${Math.round(weatherData.temperature_c)}°C · ${weatherData.city} · ${weatherData.condition}`
+    : ''
   const attachmentFollowUpChips = attachmentSuggestions.length
     ? attachmentSuggestions
     : (isAr ? ['كيف أحسّنها؟', 'ما الحذاء الأنسب؟', 'اجعلها أكثر كاجوال'] : ['How can I improve it?', 'What shoes work best?', 'Make it more casual'])
 
   const translateFeedText = useArabicTranslations([
-    ...filteredOutfits.map((outfit) => outfit.style || outfit.aesthetic?.replace(/^(male|female)\s+/i, '') || 'Outfit'),
     ...(generatedOutfit?.outfit ? [
       generatedOutfit.outfit.style,
       generatedOutfit.outfit.outfit_name,
@@ -854,10 +837,7 @@ function FeedContent() {
 
                 if (isAttachmentRatingCard) {
                   return (
-                    <div key={index} className="flex items-start gap-2 justify-start">
-                      <div className="w-11 h-11 flex items-center justify-center flex-shrink-0 mt-1">
-                        <img src="/logo.png" alt="" className="w-9 h-9 object-contain" style={{ filter: 'invert(1)', opacity: 1 }} aria-hidden="true" />
-                      </div>
+                    <div key={index} className="flex items-start gap-2 justify-start w-full">
                       <div className="flex-1 min-w-0">
                         <OutfitAnalysisCard
                           analysis={attachmentAnalysis}
@@ -875,11 +855,6 @@ function FeedContent() {
                     key={index}
                     className={`flex items-end gap-2 transition-opacity duration-300 ${turn.role === 'user' ? 'justify-end' : 'justify-start'} ${isFaded ? 'opacity-45' : 'opacity-100'}`}
                   >
-                    {turn.role === 'assistant' && (
-                      <div className="w-11 h-11 flex items-center justify-center flex-shrink-0 mb-0.5">
-                        <img src="/logo.png" alt="" className="w-9 h-9 object-contain" style={{ filter: 'invert(1)', opacity: 1 }} aria-hidden="true" />
-                      </div>
-                    )}
                     <div className={`max-w-[78%] px-4 py-2.5 text-[13px] leading-relaxed whitespace-pre-line ${
                       turn.role === 'user'
                         ? 'bg-zinc-800 text-white rounded-2xl rounded-br-sm'
@@ -987,9 +962,6 @@ function FeedContent() {
               {/* Typing indicator */}
               {isThinking || isAnalyzingAttachment ? (
                 <div className="flex items-end gap-2">
-                  <div className="w-11 h-11 flex items-center justify-center flex-shrink-0">
-                    <img src="/logo.png" alt="" className="w-9 h-9 object-contain" style={{ filter: 'invert(1)', opacity: 1 }} aria-hidden="true" />
-                  </div>
                   <div className="px-4 py-3 rounded-2xl rounded-bl-sm bg-zinc-900/80 border border-zinc-800/60">
                     <div className="flex gap-[5px] items-center" aria-label={isAr ? 'Elephante يفكر' : 'Elephante is thinking'}>
                       <span className="w-1.5 h-1.5 rounded-full bg-white/50 animate-bounce" style={{ animationDelay: '0ms' }} />
@@ -1006,106 +978,127 @@ function FeedContent() {
             {/* ── Outfit results ── */}
             {isSearching && (aiContext?.mode !== 'advice' || generatingOutfit || generatedOutfit) ? (
               <>
-                {!isThinking && (filteredOutfits.length > 0 || generatingOutfit || generatedOutfit) ? (
-                  <div className="flex items-center gap-3 mb-5">
-                    <div className="h-px bg-zinc-900 flex-1" />
-                    <span className="text-zinc-700 text-[9px] uppercase tracking-widest">
-                      {generatingOutfit
-                        ? (isAr ? 'جارٍ إنشاء إطلالتك...' : 'Creating your look...')
-                        : (generatedOutfit && filteredOutfits.length === 0)
-                          ? (isAr ? 'إطلالة مولّدة' : 'Generated look')
-                          : (isAr ? `${filteredOutfits.length} إطلالة` : `${filteredOutfits.length} outfit${filteredOutfits.length !== 1 ? 's' : ''}`)}
-                    </span>
-                    <div className="h-px bg-zinc-900 flex-1" />
+                {/* Outfit cards (AI-curated, no DB) */}
+                {!isThinking && aiContext?.mode === 'cards' && aiContext.outfit_cards?.length ? (
+                  <>
+                    {weatherData ? (
+                      <p className="mb-4 text-center text-[10px] leading-relaxed text-zinc-600">
+                        {isAr
+                          ? `حسب طقس اليوم في ${weatherDisplay}، تم تنسيق هذه الإطلالات لتناسب الظروف الحالية.`
+                          : `According to today's weather in ${weatherDisplay}, these looks are tuned for the current conditions.`}
+                      </p>
+                    ) : null}
+                    <div className="flex overflow-x-auto gap-4 pb-6 snap-x snap-mandatory -mx-4 px-4 sm:mx-0 sm:px-0 hide-scrollbar">
+                      {aiContext.outfit_cards.map((card, index) => (
+                        <div key={`${card.outfit_name}-${index}`} className="snap-center shrink-0 w-[85vw] sm:w-[320px]">
+                          <FeedOutfitCard
+                            card={card}
+                            index={index}
+                            userGender={userGender}
+                            userSkinTone={userSkinTone}
+                            userBodyShape={userBodyShape}
+                            userHeight={userHeight}
+                            userStylePref={userStylePref}
+                            language={lang}
+                            isAr={isAr}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : null}
+
+                {/* Thinking skeleton */}
+                {isThinking ? (
+                  <div className="flex overflow-x-auto gap-4 pb-6 snap-x snap-mandatory -mx-4 px-4 sm:mx-0 sm:px-0 hide-scrollbar">
+                    {[0, 1, 2].map((value) => (
+                      <div key={value} className="snap-center shrink-0 w-[85vw] sm:w-[320px]">
+                        <div className="rounded-2xl bg-zinc-950/70 border border-white/8 overflow-hidden animate-pulse h-full min-h-[300px]">
+                          <div className="p-4 space-y-3">
+                            <div className="h-3 rounded-full skeleton w-2/5" />
+                            <div className="h-2 rounded-full skeleton w-1/4 mt-1" />
+                            <div className="space-y-2 pt-1">
+                              <div className="h-2 rounded-full skeleton w-full" />
+                              <div className="h-2 rounded-full skeleton w-full" />
+                              <div className="h-2 rounded-full skeleton w-3/4" />
+                            </div>
+                            <div className="h-9 rounded-xl skeleton w-full mt-2" />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 ) : null}
 
-                {!isThinking && aiContext?.mode !== 'advice' && filteredOutfits.length === 0 && !generatingOutfit && !generatedOutfit ? (
-                  <p className="text-zinc-700 text-[11px] text-center py-8 leading-relaxed">
-                    {searchQuery ? feedTranslations[lang].emptySearch : feedTranslations[lang].emptyFeed}
-                  </p>
-                ) : null}
+                {/* Generated outfit (advice mode curation / humor) */}
+                {!isThinking && (generatingOutfit || generatedOutfit) && aiContext?.mode !== 'cards' ? (
+                  <>
+                    <div className="flex items-center gap-3 mb-5">
+                      <div className="h-px bg-zinc-900 flex-1" />
+                      <span className="text-zinc-700 text-[9px] uppercase tracking-widest">
+                        {generatingOutfit
+                          ? (isAr ? 'جارٍ إنشاء إطلالتك...' : 'Creating your look...')
+                          : (isAr ? 'إطلالة مولّدة' : 'Generated look')}
+                      </span>
+                      <div className="h-px bg-zinc-900 flex-1" />
+                    </div>
 
-                <div className="grid grid-cols-2 gap-y-5 sm:gap-y-6 gap-x-3 sm:gap-x-4">
-                  {((filteredOutfits.length === 0 && generatingOutfit && aiContext?.mode !== 'advice') || (curateTriggered && generatingOutfit)) ? (
-                    <>
-                      {[0, 1].map((value) => (
-                        <div key={value} className="group">
-                          <div className="relative w-full aspect-[3/4] overflow-hidden rounded-xl sm:rounded-2xl skeleton" />
-                          <div className="mt-2 h-2 rounded-full skeleton w-2/3" />
-                        </div>
-                      ))}
-                    </>
-                  ) : null}
-
-                  {filteredOutfits.length === 0 && !generatingOutfit && generatedOutfit ? (
-                    <>
-                      <div className="group cursor-pointer" style={{ opacity: 0, animation: 'cardIn 0.45s ease forwards', animationDelay: '0ms' }} onClick={() => handleGeneratedTap('primary')}>
-                        <div className="relative w-full aspect-[3/4] overflow-hidden rounded-xl sm:rounded-2xl bg-zinc-900 transition-transform duration-300 group-hover:scale-[1.02] group-active:scale-[0.98]">
-                          {generatedOutfit.image_url ? (
-                            <GeneratedOutfitImage src={generatedOutfit.image_url} alt={generatedOutfit.outfit?.outfit_name || (isAr ? 'إطلالة مولّدة' : 'Generated outfit')} className="w-full h-full object-cover object-top opacity-75 group-hover:opacity-100 transition-opacity duration-400" />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center"><span className="text-zinc-800 text-[9px] uppercase tracking-widest">{noImageLabel}</span></div>
-                          )}
-                        </div>
-                        {generatedOutfit.outfit?.style || generatedOutfit.outfit?.outfit_name ? (
-                          <p className="mt-1.5 text-[9px] uppercase tracking-[0.2em] text-zinc-600 group-hover:text-zinc-400 truncate px-0.5 transition-colors duration-200">
-                            {translateFeedText(generatedOutfit.outfit?.style || generatedOutfit.outfit?.outfit_name)}
-                          </p>
-                        ) : null}
-                      </div>
-
-                      {generatedOutfit.outfit?.alternative ? (
-                        <div className="group cursor-pointer" style={{ opacity: 0, animation: 'cardIn 0.45s ease forwards', animationDelay: '80ms' }} onClick={() => handleGeneratedTap('alternative')}>
-                          <div className="relative w-full aspect-[3/4] overflow-hidden rounded-xl sm:rounded-2xl bg-zinc-900 transition-transform duration-300 group-hover:scale-[1.02] group-active:scale-[0.98]">
-                            {generatedOutfit.alternative_image_url ? (
-                              <GeneratedOutfitImage src={generatedOutfit.alternative_image_url} alt={generatedOutfit.outfit.alternative?.outfit_name || (isAr ? 'إطلالة مقترحة' : 'Suggested outfit')} className="w-full h-full object-cover opacity-75 group-hover:opacity-100 transition-opacity duration-400" />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center"><span className="text-zinc-800 text-[9px] uppercase tracking-widest">{noImageLabel}</span></div>
-                            )}
-                            <span className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-black/60 text-[8px] uppercase tracking-widest text-zinc-400 border border-zinc-800/60">Alt</span>
-                          </div>
-                          {generatedOutfit.outfit.alternative?.style || generatedOutfit.outfit.alternative?.outfit_name ? (
-                            <p className="mt-1.5 text-[9px] uppercase tracking-[0.2em] text-zinc-600 group-hover:text-zinc-400 truncate px-0.5 transition-colors duration-200">
-                              {translateFeedText(generatedOutfit.outfit.alternative?.style || generatedOutfit.outfit.alternative?.outfit_name)}
-                            </p>
-                          ) : null}
-                        </div>
+                    <div className="grid grid-cols-2 gap-y-5 sm:gap-y-6 gap-x-3 sm:gap-x-4">
+                      {generatingOutfit ? (
+                        <>
+                          {[0, 1].map((value) => (
+                            <div key={value} className="group">
+                              <div className="relative w-full aspect-[3/4] overflow-hidden rounded-xl sm:rounded-2xl skeleton" />
+                              <div className="mt-2 h-2 rounded-full skeleton w-2/3" />
+                            </div>
+                          ))}
+                        </>
                       ) : null}
-                    </>
-                  ) : null}
 
-                  {filteredOutfits.map((outfit, index) => {
-                    const isBoosted = boostedIds.includes(String(outfit.id))
-                    const aiReason = aiContext?.suggestions?.find((suggestion) => String(suggestion.outfit_id) === String(outfit.id))?.reason
-                    const tag = outfit.style || outfit.aesthetic?.replace(/^(male|female)\s+/i, '') || (isAr ? 'إطلالة' : 'Outfit')
+                      {!generatingOutfit && generatedOutfit ? (
+                        <>
+                          <div className="group cursor-pointer" style={{ opacity: 0, animation: 'cardIn 0.45s ease forwards', animationDelay: '0ms' }} onClick={() => handleGeneratedTap('primary')}>
+                            <div className="relative w-full aspect-[3/4] overflow-hidden rounded-xl sm:rounded-2xl bg-zinc-900 transition-transform duration-300 group-hover:scale-[1.02] group-active:scale-[0.98]">
+                              {generatedOutfit.image_url ? (
+                                <GeneratedOutfitImage src={generatedOutfit.image_url} alt={generatedOutfit.outfit?.outfit_name || (isAr ? 'إطلالة مولّدة' : 'Generated outfit')} className="w-full h-full object-cover object-top opacity-75 group-hover:opacity-100 transition-opacity duration-400" />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center"><span className="text-zinc-800 text-[9px] uppercase tracking-widest">{noImageLabel}</span></div>
+                              )}
+                            </div>
+                            {generatedOutfit.outfit?.style || generatedOutfit.outfit?.outfit_name ? (
+                              <p className="mt-1.5 text-[9px] uppercase tracking-[0.2em] text-zinc-600 group-hover:text-zinc-400 truncate px-0.5 transition-colors duration-200">
+                                {translateFeedText(generatedOutfit.outfit?.style || generatedOutfit.outfit?.outfit_name)}
+                              </p>
+                            ) : null}
+                            {weatherData && generatedOutfit.outfit?.when_to_wear ? (
+                              <p className="mt-1 text-[10px] text-zinc-500 leading-snug px-0.5 line-clamp-2">
+                                {generatedOutfit.outfit.when_to_wear}
+                              </p>
+                            ) : null}
+                          </div>
 
-                    return (
-                      <div
-                        key={`${outfit.id}-${index}`}
-                        className="group cursor-pointer"
-                        style={{ opacity: 0, animation: 'cardIn 0.45s ease forwards', animationDelay: `${Math.min(index * 40, 400)}ms` }}
-                        onClick={() => {
-                          if (aiContext?.intent) saveSearchClick(aiContext.intent, [], String(outfit.id))
-                          saveFeedState()
-                          router.push(`/outfit/${outfit.id}`)
-                        }}
-                      >
-                        <div className="relative w-full aspect-[3/4] overflow-hidden rounded-xl sm:rounded-2xl bg-zinc-900 transition-transform duration-300 group-hover:scale-[1.02] group-active:scale-[0.97]">
-                          <OutfitCardImage outfit={outfit} alt={tag} noImageLabel={noImageLabel} />
-                          {isBoosted ? (
-                            <div className="absolute top-2 left-2 w-1.5 h-1.5 rounded-full bg-white/70 shadow-[0_0_6px_rgba(255,255,255,0.5)]" />
+                          {generatedOutfit.outfit?.alternative ? (
+                            <div className="group cursor-pointer" style={{ opacity: 0, animation: 'cardIn 0.45s ease forwards', animationDelay: '80ms' }} onClick={() => handleGeneratedTap('alternative')}>
+                              <div className="relative w-full aspect-[3/4] overflow-hidden rounded-xl sm:rounded-2xl bg-zinc-900 transition-transform duration-300 group-hover:scale-[1.02] group-active:scale-[0.98]">
+                                {generatedOutfit.alternative_image_url ? (
+                                  <GeneratedOutfitImage src={generatedOutfit.alternative_image_url} alt={generatedOutfit.outfit.alternative?.outfit_name || (isAr ? 'إطلالة مقترحة' : 'Suggested outfit')} className="w-full h-full object-cover opacity-75 group-hover:opacity-100 transition-opacity duration-400" />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center"><span className="text-zinc-800 text-[9px] uppercase tracking-widest">{noImageLabel}</span></div>
+                                )}
+                                <span className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-black/60 text-[8px] uppercase tracking-widest text-zinc-400 border border-zinc-800/60">Alt</span>
+                              </div>
+                              {generatedOutfit.outfit.alternative?.style || generatedOutfit.outfit.alternative?.outfit_name ? (
+                                <p className="mt-1.5 text-[9px] uppercase tracking-[0.2em] text-zinc-600 group-hover:text-zinc-400 truncate px-0.5 transition-colors duration-200">
+                                  {translateFeedText(generatedOutfit.outfit.alternative?.style || generatedOutfit.outfit.alternative?.outfit_name)}
+                                </p>
+                              ) : null}
+                            </div>
                           ) : null}
-                        </div>
-                        {aiReason ? (
-                          <p className="mt-1.5 text-[10px] text-zinc-500 group-hover:text-zinc-400 leading-snug px-0.5 line-clamp-2 transition-colors duration-200">{aiReason}</p>
-                        ) : (
-                          <p className="mt-1.5 text-[9px] uppercase tracking-[0.2em] text-zinc-700 group-hover:text-zinc-500 truncate px-0.5 transition-colors duration-200">{translateFeedText(tag)}</p>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
+                        </>
+                      ) : null}
+                    </div>
+                  </>
+                ) : null}
               </>
             ) : null}
           </div>

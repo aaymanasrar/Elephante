@@ -61,7 +61,10 @@ export async function requestOutfitSearch({
       weather,
     }),
   })
-  const data = await response.json().catch(() => ({}))
+  const data = await response.json().catch((err) => {
+    console.warn('[feedSearchApi] requestOutfitSearch JSON parse failed:', err)
+    return { error: 'Failed to parse response from outfit-search' }
+  })
   if (!response.ok) {
     throw new Error(typeof data?.error === 'string' ? data.error : `outfit-search failed (${response.status})`)
   }
@@ -95,7 +98,10 @@ export async function requestOutfitGeneration({
       weather,
     }),
   })
-  const data = await response.json().catch(() => ({}))
+  const data = await response.json().catch((err) => {
+    console.warn('[feedSearchApi] requestOutfitGeneration JSON parse failed:', err)
+    return { error: 'Failed to parse response from outfit-generate' }
+  })
   if (!response.ok) {
     throw new Error(typeof data?.error === 'string' ? data.error : `outfit-generate failed (${response.status})`)
   }

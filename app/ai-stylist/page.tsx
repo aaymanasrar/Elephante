@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import { getBrandShopLink, type Gender } from '@/lib/affiliates'
 import LoadingScreen from '@/app/components/LoadingScreen'
+import CreditBalanceWidget from '@/app/components/CreditBalanceWidget'
 import GradientText from '@/components/GradientText'
 import ShinyText from '@/components/ShinyText'
 import AmbientParticleCanvas from '@/components/AmbientParticleCanvas'
@@ -435,6 +436,12 @@ export default function AIStylist() {
   const [outfits, setOutfits]         = useState<Outfit[]>([])
   const [error, setError]             = useState('')
   const [savedNames, setSavedNames]   = useState<Set<string>>(new Set())
+  const [creditBalance, setCreditBalance] = useState<number | null>(null)
+  const [balanceLoading, setBalanceLoading] = useState(true)
+  const [imagePrompt, setImagePrompt] = useState('')
+  const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null)
+  const [imageGenerating, setImageGenerating] = useState(false)
+  const [imageError, setImageError] = useState('')
 
   // Form
   const [occasion, setOccasion]           = useState('Everyday')
@@ -442,6 +449,81 @@ export default function AIStylist() {
   const [season, setSeason]               = useState('')
   const [city, setCity]                   = useState('')
   const [weatherData, setWeatherData]     = useState<WeatherData | null>(null)
+
+  const getAuthHeaders = useCallback(async () => {
+    const { data } = await supabase.auth.getSession()
+    const token = data?.session?.access_token
+    return token ? { Authorization: `Bearer ${token}` } : null
+  }, [])
+
+  const loadCreditBalance = useCallback(async () => {
+    setBalanceLoading(true)
+    const authHeaders = await getAuthHeaders()
+    if (!authHeaders) {
+      setBalanceLoading(false)
+      return
+    }
+
+    try {
+      const response = await fetch('/api/user/balance', { headers: authHeaders })
+      const data = await response.json()
+      if (response.ok && typeof data.creditBalance === 'number') {
+        setCreditBalance(data.creditBalance)
+      }
+    } catch (error) {
+      console.warn('[ai-stylist] loadCreditBalance failed', error)
+    } finally {
+      setBalanceLoading(false)
+    }
+  }, [getAuthHeaders])
+
+  const generateImage = async () => {
+    const prompt = imagePrompt.trim()
+    if (!prompt) {
+      setImageError(isAr ? 'أدخل وصفًا لتوليد الصورة.' : 'Enter a prompt to generate the image.')
+      return
+    }
+
+    setImageGenerating(true)
+    setImageError('')
+
+    const authHeaders = await getAuthHeaders()
+    if (!authHeaders) {
+      setImageError(isAr ? 'سجّل الدخول مرة أخرى لتوليد الصور.' : 'Sign in again to generate images.')
+      setImageGenerating(false)
+      return
+    }
+
+    try {
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt }),
+      })
+      const data = await response.json()
+
+      if (!response.ok) {
+        setImageError(data.error || (isAr ? 'تعذّر توليد الصورة.' : 'Unable to generate the image.'))
+        return
+      }
+
+      if (data.imageUrl) {
+        setGeneratedImageUrl(data.imageUrl)
+        if (typeof data.remainingCredits === 'number') {
+          setCreditBalance(data.remainingCredits)
+        } else {
+          loadCreditBalance()
+        }
+      } else {
+        setImageError(data.error || (isAr ? 'تعذّر توليد الصورة.' : 'Unable to generate the image.'))
+      }
+    } catch (error) {
+      console.error('[ai-stylist] generateImage failed', error)
+      setImageError(isAr ? 'تعذّر توليد الصورة. حاول مرة أخرى.' : 'Could not generate the image. Try again.')
+    } finally {
+      setImageGenerating(false)
+    }
+  }
 
   useEffect(() => {
     const load = async () => {
@@ -454,6 +536,12 @@ export default function AIStylist() {
     }
     load()
   }, [router])
+
+  useEffect(() => {
+    if (!pageLoading) {
+      loadCreditBalance()
+    }
+  }, [pageLoading, loadCreditBalance])
 
   const toggleVibe = (v: string) =>
     setSelectedVibes(prev => prev.includes(v) ? prev.filter(x => x !== v) : [...prev, v])
@@ -523,7 +611,7 @@ export default function AIStylist() {
       <AmbientParticleCanvas />
 
       {/* ── Header ── */}
-      <nav className="fixed top-0 w-full z-50 px-5 py-5 flex justify-between items-center">
+      <nav className="fixed top-0 w-full z-50 px-5 py-5 flex items-center justify-between gap-3">
         <button onClick={() => router.back()} className="text-zinc-600 hover:text-white transition-colors min-h-[44px] flex items-center gap-2">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M15 18l-6-6 6-6"/>
@@ -536,7 +624,7 @@ export default function AIStylist() {
         >
           {copy.title}
         </GradientText>
-        <div className="w-7" />
+        <CreditBalanceWidget balance={creditBalance} loading={balanceLoading} onRefresh={loadCreditBalance} />
       </nav>
 
       {/* ── Scrollable content (scrollbar hidden) ── */}
@@ -617,10 +705,41 @@ export default function AIStylist() {
                 <button key={s} onClick={() => setSeason(prev => prev === s ? '' : s)}
                   className={`flex-shrink-0 flex-1 px-4 py-2 rounded-full border text-[10px] font-semibold uppercase tracking-widest transition-all duration-300 min-h-[36px] flex items-center justify-center ${
                     season === s ? 'bg-white text-black border-white shadow-[0_0_12px_rgba(255,255,255,0.15)]' : 'bg-transparent text-zinc-500 border-zinc-800 hover:border-zinc-600 hover:text-zinc-300'
-                  }`}>{trControl(s)}</button>
+                  }`}>
+                  {trControl(s)}</button>
               ))}
             </div>
           </section>
+
+          {/* ── Image prompt ── */}
+          <section>
+            <p className="text-[10px] uppercase tracking-[0.25em] text-zinc-500 mb-4">{isAr ? 'وصف الصورة' : 'Image prompt'}</p>
+            <textarea
+              value={imagePrompt}
+              onChange={e => setImagePrompt(e.target.value)}
+              placeholder={isAr ? 'مثال: إطلالة أنيقة لسهرة ليلية مع فستان باللون الأسود' : 'Example: sleek evening outfit rendered as a fashion illustration'}
+              rows={3}
+              className="w-full bg-transparent border border-zinc-800 rounded-3xl px-4 py-3 text-[12px] text-zinc-300 placeholder-zinc-700 focus:outline-none focus:border-zinc-600 transition-colors"
+            />
+          </section>
+
+          <button onClick={generateImage} disabled={imageGenerating}
+            className="w-full h-14 rounded-2xl border border-zinc-800 bg-zinc-900 text-white font-bold text-[11px] uppercase tracking-[0.35em] hover:border-white hover:text-white transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed mb-3">
+            {imageGenerating ? (
+              <span className="flex items-center justify-center gap-3">
+                <span className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                {isAr ? 'جارٍ إنشاء الصورة...' : 'Generating image...'}
+              </span>
+            ) : isAr ? 'توليد صورة' : 'Generate Image'}
+          </button>
+
+          {generatedImageUrl && (
+            <div className="rounded-3xl overflow-hidden border border-zinc-800 bg-zinc-950 mb-4">
+              <img src={generatedImageUrl} alt={isAr ? 'صورة مولّدة' : 'Generated image'} className="w-full object-cover" />
+            </div>
+          )}
+
+          {imageError && <p className="text-red-400 text-xs text-center mb-2">{imageError}</p>}
 
           {/* ── Generate button ── */}
           <button onClick={generate} disabled={generating}
@@ -639,7 +758,34 @@ export default function AIStylist() {
           {generating && (
             <div className="space-y-4">
               {[0,1,2].map(i => (
-                <div key={i} className="w-full h-64 rounded-2xl border border-zinc-900 bg-zinc-950 animate-pulse" style={{ animationDelay: `${i * 150}ms` }} />
+                <div key={i} className="w-full rounded-2xl border border-zinc-800/60 bg-zinc-900/50 backdrop-blur-sm overflow-hidden animate-pulse min-h-[350px]" style={{ animationDelay: `${i * 150}ms` }}>
+                  <div className="px-4 pt-4 pb-3 border-b border-zinc-800/40 space-y-2">
+                    <div className="h-2 rounded-full skeleton w-1/4" />
+                    <div className="h-4 rounded-full skeleton w-1/2" />
+                    <div className="h-2 rounded-full skeleton w-1/3" />
+                  </div>
+                  <div className="px-4 py-4 space-y-4">
+                    <div className="space-y-2">
+                      <div className="h-2 rounded-full skeleton w-16" />
+                      <div className="flex gap-2 pl-2">
+                        {[0, 1, 2].map(j => <div key={j} className="w-6 h-6 rounded-full skeleton" />)}
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="h-2 rounded-full skeleton w-16" />
+                      <div className="flex gap-2 pl-2 flex-wrap">
+                        {[0, 1].map(j => <div key={j} className="w-16 h-5 rounded-full skeleton" />)}
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="h-2 rounded-full skeleton w-16" />
+                      <div className="space-y-1 pl-2">
+                        <div className="h-2 rounded-full skeleton w-full" />
+                        <div className="h-2 rounded-full skeleton w-5/6" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
               ))}
             </div>
           )}

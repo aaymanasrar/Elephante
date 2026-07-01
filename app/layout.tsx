@@ -113,8 +113,8 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: `(function(){
 try{
 var k='elephante_theme_preference';
-var p=localStorage.getItem(k)||'system';
-if(p!=='dark'&&p!=='light'&&p!=='system')p='system';
+var p=localStorage.getItem(k)||'dark';
+if(p!=='dark'&&p!=='light'&&p!=='system')p='dark';
 var r=p==='system'?(matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):p;
 document.documentElement.dataset.themePreference=p;
 document.documentElement.dataset.theme=r;

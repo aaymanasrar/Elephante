@@ -151,19 +151,25 @@ export function useFeedSearch({
   const buildFollowUpPrompt = (chip: string) => {
     const baseIntent = (aiContext?.intent || searchQuery || inputValue).trim()
     const lowerBase = baseIntent.toLowerCase()
+    const isAr = language === 'ar'
+    const followUpUserCount = chatHistory.filter((turn) => turn.role === 'user').length
+    const requestedCards = Math.max(1, 3 - Math.max(0, followUpUserCount - 1))
+    const cardHint = requestedCards === 1
+      ? (isAr ? 'أرني بطاقة إطلالة واحدة.' : 'Show me 1 outfit card.')
+      : (isAr ? `أرني ${requestedCards} بطاقات إطلالة.` : `Show me ${requestedCards} outfit cards.`)
 
     switch (chip) {
-      case 'More formal': return `I want a more formal version of ${lowerBase}.`
-      case 'More casual': return `I want a more casual version of ${lowerBase}.`
-      case 'Different colours': return `Show me the same idea as ${lowerBase}, but in different colors.`
-      case 'Summer version': return `Give me a summer version of ${lowerBase}.`
-      case 'Night out version': return `Give me a night out version of ${lowerBase}.`
-      case 'Smart Casual': return `${lowerBase} — show me smart casual outfit options.`
-      case 'Formal / Work': return `${lowerBase} — I need formal or work-appropriate outfit options.`
-      case 'Weekend Casual': return `${lowerBase} — give me casual weekend outfit ideas.`
-      case 'Night Out': return `${lowerBase} — make it a night out look.`
-      case 'Summer Look': return `${lowerBase} — show me summer outfit options.`
-      default: return chip
+      case 'More formal': return `${cardHint} I want a more formal version of ${lowerBase}.`
+      case 'More casual': return `${cardHint} I want a more casual version of ${lowerBase}.`
+      case 'Different colours': return `${cardHint} Show me the same idea as ${lowerBase}, but in different colors.`
+      case 'Summer version': return `${cardHint} Give me a summer version of ${lowerBase}.`
+      case 'Night out version': return `${cardHint} Give me a night out version of ${lowerBase}.`
+      case 'Smart Casual': return `${cardHint} ${lowerBase} — show me smart casual outfit options.`
+      case 'Formal / Work': return `${cardHint} ${lowerBase} — I need formal or work-appropriate outfit options.`
+      case 'Weekend Casual': return `${cardHint} ${lowerBase} — give me casual weekend outfit ideas.`
+      case 'Night Out': return `${cardHint} ${lowerBase} — make it a night out look.`
+      case 'Summer Look': return `${cardHint} ${lowerBase} — show me summer outfit options.`
+      default: return `${chip} ${cardHint}`
     }
   }
 
@@ -210,5 +216,9 @@ export function useFeedSearch({
     setInputValue,
     setSearchQuery,
     triggerCuration,
+    setAiContext,
+    setFinalBanner,
+    setGeneratedOutfit,
+    setGeneratedIds,
   }
 }

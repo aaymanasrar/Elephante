@@ -4,7 +4,17 @@ import { useEffect } from 'react'
 
 export interface PersistedFeedState<TAiContext, TGeneratedOutfit> {
   aiContext: TAiContext | null
-  chatHistory: Array<{ role: 'user' | 'assistant'; content: string }>
+  chatHistory: Array<{
+    role: 'user' | 'assistant'
+    content: string
+    display?: string
+    imagePreview?: string
+    analysis?: any
+    outfitCards?: any[]
+    generatedOutfit?: any
+    colors?: Array<{ hex: string; name: string }>
+    mode?: string
+  }>
   finalBanner: { text: string; vibe: string; colors?: Array<{ hex: string; name: string }> } | null
   generatedIds: { primary?: string; alternative?: string }
   generatedOutfit: TGeneratedOutfit | null
@@ -14,7 +24,17 @@ export interface PersistedFeedState<TAiContext, TGeneratedOutfit> {
 
 interface FeedStatePersistenceParams<TAiContext, TGeneratedOutfit> {
   aiContext: TAiContext | null
-  chatHistory: Array<{ role: 'user' | 'assistant'; content: string }>
+  chatHistory: Array<{
+    role: 'user' | 'assistant'
+    content: string
+    display?: string
+    imagePreview?: string
+    analysis?: any
+    outfitCards?: any[]
+    generatedOutfit?: any
+    colors?: Array<{ hex: string; name: string }>
+    mode?: string
+  }>
   finalBanner: { text: string; vibe: string; colors?: Array<{ hex: string; name: string }> } | null
   generatedIds: { primary?: string; alternative?: string }
   generatedOutfit: TGeneratedOutfit | null

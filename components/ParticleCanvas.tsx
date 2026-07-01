@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef } from 'react'
+import { useTheme } from '@/lib/theme-context'
 
 interface ParticleCanvasProps {
   className?: string
@@ -23,6 +24,7 @@ export default function ParticleCanvas({
   mobileCount = 55,
 }: ParticleCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const { resolvedTheme } = useTheme()
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -39,6 +41,10 @@ export default function ParticleCanvas({
     let width = 0
     let height = 0
     let particles: Particle[] = []
+
+    const isLight = resolvedTheme === 'light'
+    const colorRGB = isLight ? '23, 23, 23' : '255, 255, 255'
+    const radialCenterColor = isLight ? 'rgba(23, 23, 23, 0.02)' : 'rgba(255, 255, 255, 0.025)'
 
     const resizeCanvas = () => {
       width = canvas.width = window.innerWidth
@@ -60,8 +66,8 @@ export default function ParticleCanvas({
       context.clearRect(0, 0, width, height)
 
       const gradient = context.createRadialGradient(width / 2, height / 2, 0, width / 2, height / 2, width * 0.55)
-      gradient.addColorStop(0, 'rgba(255,255,255,0.025)')
-      gradient.addColorStop(1, 'rgba(0,0,0,0)')
+      gradient.addColorStop(0, radialCenterColor)
+      gradient.addColorStop(1, isLight ? 'rgba(255,255,255,0)' : 'rgba(0,0,0,0)')
       context.fillStyle = gradient
       context.fillRect(0, 0, width, height)
 
@@ -77,7 +83,7 @@ export default function ParticleCanvas({
 
           if (distance < 140) {
             context.beginPath()
-            context.strokeStyle = `rgba(255,255,255,${0.055 * (1 - distance / 140)})`
+            context.strokeStyle = `rgba(${colorRGB},${0.055 * (1 - distance / 140)})`
             context.lineWidth = 0.5
             context.moveTo(first.x, first.y)
             context.lineTo(second.x, second.y)
@@ -89,7 +95,7 @@ export default function ParticleCanvas({
       for (const particle of particles) {
         context.beginPath()
         context.arc(particle.x, particle.y, particle.r, 0, Math.PI * 2)
-        context.fillStyle = `rgba(255,255,255,${particle.alpha})`
+        context.fillStyle = `rgba(${colorRGB},${particle.alpha})`
         context.fill()
 
         particle.x += particle.vx
@@ -126,7 +132,7 @@ export default function ParticleCanvas({
       cancelAnimationFrame(animationFrame)
       window.removeEventListener('resize', handleResize)
     }
-  }, [desktopCount, mobileCount])
+  }, [desktopCount, mobileCount, resolvedTheme])
 
   return <canvas ref={canvasRef} className={className} style={{ background: 'transparent' }} />
 }

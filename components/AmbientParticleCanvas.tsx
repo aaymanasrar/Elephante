@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef } from 'react'
+import { useTheme } from '@/lib/theme-context'
 
 interface AmbientParticleCanvasProps {
   className?: string
@@ -23,6 +24,7 @@ export default function AmbientParticleCanvas({
   mobileCount = 24,
 }: AmbientParticleCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const { resolvedTheme } = useTheme()
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -39,6 +41,10 @@ export default function AmbientParticleCanvas({
     let width = 0
     let height = 0
     let particles: Particle[] = []
+
+    const isLight = resolvedTheme === 'light'
+    const colorRGB = isLight ? '23, 23, 23' : '255, 255, 255'
+    const radialCenterColor = isLight ? 'rgba(23, 23, 23, 0.02)' : 'rgba(255, 255, 255, 0.025)'
 
     const resize = () => {
       width = canvas.width = window.innerWidth
@@ -60,8 +66,8 @@ export default function AmbientParticleCanvas({
       ctx.clearRect(0, 0, width, height)
 
       const gradient = ctx.createRadialGradient(width / 2, height / 2, 0, width / 2, height / 2, width * 0.55)
-      gradient.addColorStop(0, 'rgba(255,255,255,0.025)')
-      gradient.addColorStop(1, 'rgba(0,0,0,0)')
+      gradient.addColorStop(0, radialCenterColor)
+      gradient.addColorStop(1, isLight ? 'rgba(255,255,255,0)' : 'rgba(0,0,0,0)')
       ctx.fillStyle = gradient
       ctx.fillRect(0, 0, width, height)
 
@@ -77,7 +83,7 @@ export default function AmbientParticleCanvas({
 
           if (!coarsePointer && distance < 140) {
             ctx.beginPath()
-            ctx.strokeStyle = `rgba(255,255,255,${0.055 * (1 - distance / 140)})`
+            ctx.strokeStyle = `rgba(${colorRGB},${0.055 * (1 - distance / 140)})`
             ctx.lineWidth = 0.5
             ctx.moveTo(first.x, first.y)
             ctx.lineTo(second.x, second.y)
@@ -89,7 +95,7 @@ export default function AmbientParticleCanvas({
       for (const particle of particles) {
         ctx.beginPath()
         ctx.arc(particle.x, particle.y, particle.r, 0, Math.PI * 2)
-        ctx.fillStyle = `rgba(255,255,255,${particle.alpha})`
+        ctx.fillStyle = `rgba(${colorRGB},${particle.alpha})`
         ctx.fill()
 
         particle.x += particle.vx
@@ -123,7 +129,7 @@ export default function AmbientParticleCanvas({
       cancelAnimationFrame(animationId)
       window.removeEventListener('resize', handleResize)
     }
-  }, [desktopCount, mobileCount])
+  }, [desktopCount, mobileCount, resolvedTheme])
 
   return <canvas ref={canvasRef} className={className} style={{ background: 'transparent' }} />
 }

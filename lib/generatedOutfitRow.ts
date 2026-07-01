@@ -18,6 +18,7 @@ interface GeneratedOutfitLike {
   material_shoes?: string | null
   key_colors?: string[] | null
   gender?: string | null
+  brand?: string | null
 }
 
 function normalizeOptionalText(value?: string | null) {
@@ -59,5 +60,6 @@ export function buildGeneratedOutfitRow(
     hex_colors: generated.key_colors || null,
     image_url: imageUrl || null,
     gender: primaryOutfit.gender || 'male',
+    brand: generated.brand || null,
   }
 }

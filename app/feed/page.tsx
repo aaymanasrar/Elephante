@@ -11,7 +11,9 @@ import OutfitAnalysisCard from '@/app/feed/components/OutfitAnalysisCard'
 import SearchFooter from '@/app/feed/components/SearchFooter'
 import LoadingSpinner from '@/components/LoadingSpinner'
 import ParticleCanvas from '@/components/ParticleCanvas'
-import { feedTranslations } from '@/data/translations'
+import Logo from '@/components/Logo'
+import { supabase } from '@/lib/supabase'
+import { insertGeneratedOutfit } from '@/services/outfitService'
 import { useLocale } from '@/lib/locale-context'
 import { useKeyboardOffset } from '@/hooks/useFeedUi'
 import { clearFeedState, isAutomaticFeedQuery, writeLastFeedUrl } from '@/hooks/useFeedStatePersistence'
@@ -25,6 +27,11 @@ import { canUseNextImage } from '@/lib/image'
 const EN = 'What shall we dress you for today?'
 const AR = '\u0628\u0645\u0627\u0630\u0627 \u0646\u064f\u0644\u0628\u0633\u0643 \u0627\u0644\u064a\u0648\u0645\u061f'
 const NL_SIGNALS = ['suggest', 'suggestion', 'recommend', 'recommendation', 'help', 'need', 'want', 'have', 'going', 'date', 'event', 'tonight', 'evening', 'morning', 'special', 'something', 'occasion', 'meeting', 'interview', 'wedding', 'party', 'dinner', 'casual', 'formal', 'office', 'work', 'business', 'weekend', 'summer', 'winter', 'night', 'out', 'smart', 'what', 'which', 'give', 'me', 'feel', 'look', 'wear', 'style', 'fit', 'outfit', 'dress', 'rate']
+const BUY_SIGNALS = ['buy', 'purchase', 'shop', 'get it', 'get me', 'find me', 'where to', 'where can', 'looking to buy', 'want to buy', 'to buy', 'order', 'pick up', 'from where', 'where from', 'اشتري', 'أشتري', 'أبحث عن', 'أريد شراء', 'من أين']
+function hasBuyFollowUp(query: string): boolean {
+  const lower = query.toLowerCase()
+  return BUY_SIGNALS.some(s => lower.includes(s))
+}
 const POSSESSION_PREFIXES = ['i have', 'i own', "i've got", 'i got', "i'm wearing", 'wearing my', 'i wear']
 
 function SearchPlaceholder({ active, text }: { active: boolean; text?: string }) {
@@ -40,36 +47,6 @@ function SearchPlaceholder({ active, text }: { active: boolean; text?: string })
       }}
     >
       {text || (isAr ? AR : EN)}
-    </span>
-  )
-}
-
-function TypewriterText({ text, speed = 18 }: { text: string; speed?: number }) {
-  const [displayed, setDisplayed] = useState('')
-  const [done, setDone] = useState(false)
-
-  useEffect(() => {
-    setDisplayed('')
-    setDone(false)
-    if (!text) return
-
-    let index = 0
-    const timer = setInterval(() => {
-      index += 1
-      setDisplayed(text.slice(0, index))
-      if (index >= text.length) {
-        clearInterval(timer)
-        setDone(true)
-      }
-    }, speed)
-
-    return () => clearInterval(timer)
-  }, [text, speed])
-
-  return (
-    <span>
-      {displayed}
-      {!done ? <span className="inline-block w-[2px] h-[1em] bg-zinc-400 align-middle ml-[1px] animate-pulse" /> : null}
     </span>
   )
 }
@@ -339,6 +316,7 @@ function FeedContent() {
   const [isAnalyzingAttachment, setIsAnalyzingAttachment] = useState(false)
   const [isDraggingPhoto, setIsDraggingPhoto] = useState(false)
   const [weatherData, setWeatherData] = useState<WeatherInfo | null>(null)
+  const [userCoords, setUserCoords] = useState<{ lat: number; lon: number } | null>(null)
   const weatherFetchedRef = useRef(false)
   const prevHistoryLenRef = useRef(0)
   const dragDepthRef = useRef(0)
@@ -363,6 +341,7 @@ function FeedContent() {
       async (position) => {
         try {
           const { latitude: lat, longitude: lon } = position.coords
+          setUserCoords({ lat, lon })
           const response = await fetch('/api/weather', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -391,17 +370,22 @@ function FeedContent() {
     clearActiveSearchState,
     curateTriggered,
     finalBanner,
+    generatedIds,
     generatedOutfit,
     generatingOutfit,
     handleGeneratedTap,
     inputValue,
     isSearching,
     isThinking,
-    saveFeedState,
     searchQuery,
     setInputValue,
     setSearchQuery,
     triggerCuration,
+    setAiContext,
+    setFinalBanner,
+    setGeneratedOutfit,
+    setGeneratedIds,
+    setChatHistory,
   } = useFeedSearch({
     displayName,
     initialQuery,
@@ -433,6 +417,7 @@ function FeedContent() {
     clearAttachment,
     fileInputRef,
     handleAttachment,
+    analyzeWithAIServer,
   } = useWardrobeAttachment(
     userId,
     (query) => {
@@ -504,29 +489,27 @@ function FeedContent() {
   const handleQuickCurate = useCallback((mode: 'similar' | 'different') => {
     if (!attachment?.image_url || attachment.uploading) return
     const query = buildCurationQueryFromAttachment(attachment, isAr, mode)
-    setAttachmentAnalysis(null)
-    setAttachmentAnalysisMode(null)
-    setAttachmentChat(null)
-    setAttachmentSuggestions([])
-    setAttachmentTurns([])
+    setChatHistory((prev) => [
+      ...prev,
+      { role: 'user', content: query, imagePreview: attachment.image_url }
+    ])
     clearAttachment({ clearSearch: false })
-    setSearchQuery(query)
     setInputValue('')
+    setSearchQuery(query)
     triggerCuration()
-  }, [attachment, isAr, clearAttachment, setSearchQuery, setInputValue, triggerCuration])
+  }, [attachment, isAr, clearAttachment, setSearchQuery, setInputValue, triggerCuration, setChatHistory])
 
-  const handleAnalysisCurate = useCallback((mode: 'similar' | 'different') => {
-    if (!attachmentAnalysis) return
-    const query = buildCurationQueryFromAnalysis(attachmentAnalysis, isAr, mode)
-    setAttachmentAnalysis(null)
-    setAttachmentAnalysisMode(null)
-    setAttachmentChat(null)
-    setAttachmentSuggestions([])
-    setAttachmentTurns([])
-    setSearchQuery(query)
+  const handleAnalysisCurate = useCallback((mode: 'similar' | 'different', analysis: AttachmentAnalysis | null = attachmentAnalysis) => {
+    if (!analysis) return
+    const query = buildCurationQueryFromAnalysis(analysis, isAr, mode)
+    setChatHistory((prev) => [
+      ...prev,
+      { role: 'user', content: query }
+    ])
     setInputValue('')
+    setSearchQuery(query)
     triggerCuration()
-  }, [attachmentAnalysis, isAr, setSearchQuery, setInputValue, triggerCuration])
+  }, [attachmentAnalysis, isAr, setSearchQuery, setInputValue, triggerCuration, setChatHistory])
 
 
   useEffect(() => {
@@ -603,7 +586,7 @@ function FeedContent() {
     if (isQuestion && !prompt) return
 
     const userText = prompt || (isAr ? 'تحليل الإطلالة' : 'Style Check')
-    const priorTurns = sourceAttachment ? [] : attachmentTurns
+    const priorTurns = chatHistory
     const userTurn: FeedChatTurn = {
       role: 'user',
       content: sourceAttachment ? `📎 ${userText}` : userText,
@@ -615,11 +598,10 @@ function FeedContent() {
     setAttachmentSuggestions([])
     setAttachmentAnalysisMode(isQuestion ? null : mode)
     if (sourceAttachment || !isQuestion) setAttachmentAnalysis(null)
-    setAttachmentTurns([...priorTurns, userTurn])
+    setChatHistory([...priorTurns, userTurn])
     setPendingUserMessage('')
     setInputValue('')
     setSearchQuery('')
-    clearActiveSearchState()
 
     if (sourceAttachment) clearAttachment({ clearSearch: false })
 
@@ -655,7 +637,7 @@ function FeedContent() {
           ? data.answer.trim()
           : (isAr ? 'أستطيع مساعدتك في هذه الصورة. اسألني عن التناسق أو الألوان أو كيف نطوّر الإطلالة.' : 'I can help with this photo. Ask me about the balance, colors, or how to improve the look.')
         setAttachmentSuggestions(Array.isArray(data.suggested_questions) ? data.suggested_questions.filter((item: unknown): item is string => typeof item === 'string' && item.trim().length > 0).slice(0, 3) : [])
-        setAttachmentTurns((previous) => [...previous, { role: 'assistant', content: answer }])
+        setChatHistory((previous) => [...previous, { role: 'assistant', content: answer }])
         return
       }
 
@@ -666,17 +648,18 @@ function FeedContent() {
       setAttachmentSuggestions(isAr
         ? ['كيف أحسّنها؟', 'ما الحذاء الأنسب؟', 'اجعلها أكثر رسمية']
         : ['How can I improve it?', 'What shoes work best?', 'Make it more formal'])
-      setAttachmentTurns((previous) => [
+      setChatHistory((previous) => [
         ...previous,
         {
           role: 'assistant',
           content: buildAttachmentAnalysisMessage(analysis, isAr, analysisMode),
           display: analysisMode === 'rating' ? 'analysis-card' : undefined,
+          analysis,
         },
       ])
     } catch (error) {
       const message = error instanceof Error ? error.message : (isAr ? 'تعذّر تحليل الصورة.' : 'Could not analyze the photo.')
-      setAttachmentTurns((previous) => [
+      setChatHistory((previous) => [
         ...previous,
         {
           role: 'assistant',
@@ -693,13 +676,14 @@ function FeedContent() {
     attachment,
     attachmentAnalysis,
     attachmentChat,
-    attachmentTurns,
+    chatHistory,
     clearAttachment,
     clearActiveSearchState,
     isAr,
     lang,
     setInputValue,
     setSearchQuery,
+    setChatHistory,
     userBodyShape,
     userGender,
     userHeight,
@@ -724,6 +708,218 @@ function FeedContent() {
     }
   }, [attachmentAnalysis, attachmentChat, attachmentTurns.length, chatHistory.length, finalBanner, isAnalyzingAttachment, isThinking, pendingUserMessage])
 
+  interface ChatSession {
+    id: string
+    title: string
+    timestamp: number
+    chatHistory: FeedChatTurn[]
+    searchQuery: string
+    aiContext: any
+    finalBanner: any
+    generatedOutfit: any
+    generatedIds: any
+  }
+
+  const [chats, setChats] = useState<ChatSession[]>([])
+  const [activeChatId, setActiveChatId] = useState<string | null>(null)
+
+  // Load chat sessions from localStorage on mount
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('elephante_chats_history')
+      if (stored) {
+        setChats(JSON.parse(stored))
+      }
+      const activeId = localStorage.getItem('elephante_active_chat_id')
+      if (activeId) {
+        setActiveChatId(activeId)
+      }
+    } catch (e) {
+      console.warn('Failed to load chats from localStorage:', e)
+    }
+  }, [])
+
+  // Sync active chat session to localStorage whenever history or result states change
+  useEffect(() => {
+    if (chatHistory.length === 0) return
+
+    let currentId = activeChatId
+
+    if (!currentId) {
+      currentId = `chat_${Date.now()}`
+      setActiveChatId(currentId)
+      localStorage.setItem('elephante_active_chat_id', currentId)
+
+      const firstUserMsg = chatHistory.find(t => t.role === 'user')?.content || 'Style Chat'
+      const title = firstUserMsg.replace(/^📎\s*/, '').slice(0, 36) + (firstUserMsg.length > 36 ? '...' : '')
+
+      const newSession: ChatSession = {
+        id: currentId,
+        title,
+        timestamp: Date.now(),
+        chatHistory,
+        searchQuery,
+        aiContext,
+        finalBanner,
+        generatedOutfit,
+        generatedIds,
+      }
+      
+      setChats((prev) => {
+        const next = [newSession, ...prev.filter(c => c.id !== newSession.id)]
+        localStorage.setItem('elephante_chats_history', JSON.stringify(next))
+        return next
+      })
+    } else {
+      setChats((prev) => {
+        const index = prev.findIndex(c => c.id === currentId)
+        let next = [...prev]
+        if (index !== -1) {
+          next[index] = {
+            ...next[index]!,
+            chatHistory,
+            searchQuery,
+            aiContext,
+            finalBanner,
+            generatedOutfit,
+            generatedIds,
+          }
+        } else {
+          const firstUserMsg = chatHistory.find(t => t.role === 'user')?.content || 'Style Chat'
+          const title = firstUserMsg.replace(/^📎\s*/, '').slice(0, 36) + (firstUserMsg.length > 36 ? '...' : '')
+          next = [{
+            id: currentId!,
+            title,
+            timestamp: Date.now(),
+            chatHistory,
+            searchQuery,
+            aiContext,
+            finalBanner,
+            generatedOutfit,
+            generatedIds,
+          }, ...next]
+        }
+        localStorage.setItem('elephante_chats_history', JSON.stringify(next))
+        return next
+      })
+    }
+  }, [chatHistory, searchQuery, aiContext, finalBanner, generatedOutfit, generatedIds, activeChatId])
+
+  const handleLoadChat = useCallback((id: string) => {
+    setChats((prev) => {
+      const chat = prev.find(c => c.id === id)
+      if (chat) {
+        setActiveChatId(chat.id)
+        localStorage.setItem('elephante_active_chat_id', chat.id)
+        
+        setInputValue('')
+        setSearchQuery('')
+        setChatHistory(chat.chatHistory || [])
+        setAiContext(chat.aiContext || null)
+        setFinalBanner(chat.finalBanner || null)
+        setGeneratedOutfit(chat.generatedOutfit || null)
+        setGeneratedIds(chat.generatedIds || {})
+        
+        clearAttachment({ clearSearch: false })
+        setAttachmentAnalysis(null)
+        setAttachmentAnalysisMode(null)
+        setAttachmentChat(null)
+        setAttachmentSuggestions([])
+      }
+      return prev
+    })
+  }, [setInputValue, setSearchQuery, setChatHistory, setAiContext, setFinalBanner, setGeneratedOutfit, setGeneratedIds, clearAttachment])
+
+  const handleDeleteChat = useCallback((id: string) => {
+    setChats((prev) => {
+      const next = prev.filter(c => c.id !== id)
+      localStorage.setItem('elephante_chats_history', JSON.stringify(next))
+      return next
+    })
+    
+    setActiveChatId((currentId) => {
+      if (currentId === id) {
+        localStorage.removeItem('elephante_active_chat_id')
+        setInputValue('')
+        setSearchQuery('')
+        setPendingUserMessage('')
+        setChipDisplayMap({})
+        setAttachmentAnalysis(null)
+        setAttachmentAnalysisMode(null)
+        setAttachmentChat(null)
+        setAttachmentSuggestions([])
+        clearActiveSearchState()
+        return null
+      }
+      return currentId
+    })
+  }, [setInputValue, setSearchQuery, clearActiveSearchState])
+
+  const handleNewChat = useCallback(() => {
+    setActiveChatId(null)
+    localStorage.removeItem('elephante_active_chat_id')
+    
+    setInputValue('')
+    setSearchQuery('')
+    setPendingUserMessage('')
+    setChipDisplayMap({})
+    setAttachmentAnalysis(null)
+    setAttachmentAnalysisMode(null)
+    setAttachmentChat(null)
+    setAttachmentSuggestions([])
+    clearActiveSearchState()
+  }, [setInputValue, setSearchQuery, clearActiveSearchState])
+
+  const handleInlineGeneratedTap = async (inlineGeneratedOutfit: any, type: 'primary' | 'alternative') => {
+    if (!inlineGeneratedOutfit) return
+
+    const existingId = generatedIds[type]
+    if (existingId) {
+      router.push(`/outfit/${existingId}`)
+      return
+    }
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        router.push('/login')
+        return
+      }
+
+      const isAlternative = type === 'alternative'
+      const outfit = isAlternative ? inlineGeneratedOutfit.outfit?.alternative : inlineGeneratedOutfit.outfit
+      const primaryOutfit = inlineGeneratedOutfit.outfit || {}
+      const imageUrl = isAlternative ? inlineGeneratedOutfit.alternative_image_url : inlineGeneratedOutfit.image_url
+
+      const { data: inserted } = await insertGeneratedOutfit(outfit, {
+        type,
+        primaryOutfit,
+        imageUrl,
+      })
+
+      if (inserted?.id) {
+        setGeneratedIds((prev) => ({ ...prev, [type]: inserted.id }))
+        setChatHistory((prev) => {
+          const next = [...prev]
+          for (let i = next.length - 1; i >= 0; i--) {
+            const turn = next[i]
+            if (turn && turn.role === 'assistant' && turn.generatedOutfit === inlineGeneratedOutfit) {
+              next[i] = {
+                ...turn,
+                generatedOutfit: isAlternative
+                  ? { ...turn.generatedOutfit!, alternative_image_url: inserted.image_url } as typeof turn.generatedOutfit
+                  : { ...turn.generatedOutfit!, image_url: inserted.image_url } as typeof turn.generatedOutfit
+              }
+              break
+            }
+          }
+          return next
+        })
+        router.push(`/outfit/${inserted.id}`)
+      }
+    } catch {}
+  }
+
   // Chip tap: show chip label in chat, send full prompt to AI
   const handleChipTap = useCallback((chip: string) => {
     const prompt = buildFollowUpPrompt(chip)
@@ -731,7 +927,6 @@ function FeedContent() {
     setAttachmentAnalysisMode(null)
     setAttachmentChat(null)
     setAttachmentSuggestions([])
-    setAttachmentTurns([])
     setChipDisplayMap((previous) => ({ ...previous, [prompt]: chip }))
     setPendingUserMessage(chip)
     setInputValue('')
@@ -744,8 +939,8 @@ function FeedContent() {
 
   const noImageLabel = isAr ? 'لا توجد صورة' : 'No image'
 
-  const isAttachmentAnalysisOpen = isAnalyzingAttachment || attachmentTurns.length > 0 || Boolean(attachmentAnalysis || attachmentChat)
-  const isSearchSurfaceOpen = isSearching || isAttachmentAnalysisOpen
+  const isAttachmentAnalysisOpen = isAnalyzingAttachment || Boolean(attachmentChat)
+  const isSearchSurfaceOpen = isSearching || isAttachmentAnalysisOpen || chatHistory.length > 0
 
   // Request geolocation once the app is ready — triggers the browser permission prompt on first visit
   useEffect(() => {
@@ -754,7 +949,6 @@ function FeedContent() {
     void fetchWeatherForLocation()
   }, [loading, authLoading, fetchWeatherForLocation])
 
-  const visibleChatHistory: FeedChatTurn[] = attachmentTurns.length > 0 ? attachmentTurns : chatHistory
   const weatherDisplay = weatherData
     ? `${Math.round(weatherData.temperature_c)}°C · ${weatherData.city} · ${weatherData.condition}`
     : ''
@@ -771,7 +965,40 @@ function FeedContent() {
     ] : []),
   ], isAr)
 
-  if (loading || authLoading) return <LoadingScreen />
+  if (loading || authLoading) return (
+    <div className="bg-black text-white font-sans" style={{ height: '100dvh' }}>
+      <ParticleCanvas desktopCount={36} mobileCount={24} />
+
+      {/* Top-left hamburger placeholder */}
+      <div
+        className="fixed z-50 w-5 h-5 rounded skeleton opacity-20"
+        style={{ top: 'max(2rem, env(safe-area-inset-top))', left: '1rem', marginTop: '0.125rem' }}
+      />
+
+      {/* Top-right closet icon placeholder */}
+      <div
+        className="fixed z-50 w-5 h-5 rounded skeleton opacity-20"
+        style={{ top: 'max(2rem, env(safe-area-inset-top))', right: '1rem', marginTop: '0.125rem' }}
+      />
+
+      {/* Centred logo + username skeleton */}
+      <div className="fixed inset-0 flex flex-col items-center justify-center gap-3 pointer-events-none z-40">
+        <Logo size={96} opacity={0.25} decorative className="animate-pulse" />
+        <div className="h-2.5 w-20 rounded-full skeleton opacity-20" />
+      </div>
+
+      {/* Bottom search bar skeleton */}
+      <div
+        className="fixed left-0 right-0 z-50 pt-5 px-4"
+        style={{ bottom: 0, paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom))' }}
+      >
+        <div className="flex items-center gap-2 max-w-md mx-auto">
+          <div className="flex-shrink-0 w-[52px] h-[56px] rounded-3xl skeleton opacity-20" />
+          <div className="flex-1 h-[56px] rounded-3xl skeleton opacity-20" />
+        </div>
+      </div>
+    </div>
+  )
 
   return (
     <div className="bg-black text-white font-sans selection:bg-zinc-800" style={{ height: '100dvh' }}>
@@ -790,22 +1017,17 @@ function FeedContent() {
       <FeedHeader
         displayName={displayName}
         isSearching={isSearchSurfaceOpen}
-        onGoHome={() => {
-          setInputValue('')
-          setSearchQuery('')
-          setPendingUserMessage('')
-          setChipDisplayMap({})
-          setAttachmentAnalysis(null)
-          setAttachmentAnalysisMode(null)
-          setAttachmentChat(null)
-          setAttachmentSuggestions([])
-          setAttachmentTurns([])
-          clearActiveSearchState()
-        }}
+        onGoHome={handleNewChat}
         onOpenAiStylist={() => router.push('/ai-stylist')}
         onOpenCloset={() => router.push('/closet')}
         onOpenProfile={() => router.push('/profile')}
+        onOpenOutfitBuilder={() => router.push('/outfit-builder')}
         onOpenTravelPack={() => router.push('/travel-pack')}
+        chats={chats}
+        activeChatId={activeChatId}
+        onLoadChat={handleLoadChat}
+        onDeleteChat={handleDeleteChat}
+        onNewChat={handleNewChat}
       />
 
       <div
@@ -817,80 +1039,152 @@ function FeedContent() {
         } as React.CSSProperties}
       >
         {isSearchSurfaceOpen ? (
-          <div className="px-4 sm:px-6 pb-8 animate-in fade-in slide-in-from-bottom-4 duration-500" style={{ paddingTop: 'calc(max(2rem, env(safe-area-inset-top)) + 60px)' }}>
+          <div className="px-4 sm:px-6 animate-in fade-in slide-in-from-bottom-4 duration-500" style={{ paddingTop: 'calc(max(2rem, env(safe-area-inset-top)) + 60px)', paddingBottom: 'calc(max(2rem, env(safe-area-inset-bottom)) + 140px)' }}>
 
-            {/* ── Chat thread ── */}
-            <div className="flex flex-col gap-2.5 mb-4">
-              {visibleChatHistory.map((turn, index) => {
-                const isLatestAssistant = turn.role === 'assistant' && index === visibleChatHistory.length - 1 && Boolean(finalBanner) && attachmentTurns.length === 0
+            {/* ── Feed thread ── */}
+            <div className="flex flex-col gap-6 mb-4 max-w-5xl mx-auto w-full">
+              {chatHistory.map((turn, index) => {
                 const displayText = turn.role === 'user'
                   ? (chipDisplayMap[turn.content] ?? turn.content)
                   : turn.content
-                const isFaded = index < visibleChatHistory.length - 2
 
-                // Rating mode: replace the assistant text bubble with the visual card
-                const isAttachmentRatingCard =
-                  attachmentTurns.length > 0 &&
-                  turn.role === 'assistant' &&
-                  turn.display === 'analysis-card' &&
-                  attachmentAnalysis != null
-
-                if (isAttachmentRatingCard) {
+                // Rating mode: render analysis card inline
+                if (turn.role === 'assistant' && turn.display === 'analysis-card' && turn.analysis != null) {
                   return (
-                    <div key={index} className="flex items-start gap-2 justify-start w-full">
-                      <div className="flex-1 min-w-0">
-                        <OutfitAnalysisCard
-                          analysis={attachmentAnalysis}
-                          isAr={isAr}
-                          onFindSimilar={() => handleAnalysisCurate('similar')}
-                          onRestyle={() => handleAnalysisCurate('different')}
-                        />
+                    <OutfitAnalysisCard
+                      key={index}
+                      analysis={turn.analysis}
+                      isAr={isAr}
+                      onFindSimilar={() => handleAnalysisCurate('similar', turn.analysis)}
+                      onRestyle={() => handleAnalysisCurate('different', turn.analysis)}
+                    />
+                  )
+                }
+
+                const isUser = turn.role === 'user'
+
+                // User query: right-aligned compact pill
+                if (isUser) {
+                  return (
+                    <div key={index} className="flex justify-end">
+                      <div className="px-4 py-2 rounded-2xl rounded-br-sm bg-zinc-800/70 border border-zinc-700/40 text-white text-[13px] leading-relaxed max-w-[70%]">
+                        {turn.imagePreview ? (
+                          <div className="mb-2 overflow-hidden rounded-xl border border-white/10 bg-black/20">
+                            <img src={turn.imagePreview} alt="" className="w-full max-h-44 object-cover object-top" aria-hidden="true" />
+                          </div>
+                        ) : null}
+                        {displayText}
                       </div>
                     </div>
                   )
                 }
 
-                return (
-                  <div
-                    key={index}
-                    className={`flex items-end gap-2 transition-opacity duration-300 ${turn.role === 'user' ? 'justify-end' : 'justify-start'} ${isFaded ? 'opacity-45' : 'opacity-100'}`}
-                  >
-                    <div className={`max-w-[78%] px-4 py-2.5 text-[13px] leading-relaxed whitespace-pre-line ${
-                      turn.role === 'user'
-                        ? 'bg-zinc-800 text-white rounded-2xl rounded-br-sm'
-                        : 'bg-zinc-900/80 border border-zinc-800/60 text-zinc-200 rounded-2xl rounded-bl-sm'
-                    }`}>
-                      {turn.imagePreview ? (
-                        <div className="mb-2 overflow-hidden rounded-xl border border-white/10 bg-black/20">
-                          <img src={turn.imagePreview} alt="" className="w-full max-h-44 object-cover object-top" aria-hidden="true" />
-                        </div>
+                // Assistant with outfit cards: full-width grid
+                if (turn.outfitCards && turn.outfitCards.length > 0) {
+                  return (
+                    <div key={index} className="flex flex-col gap-4">
+                      {displayText ? (
+                        <p className="text-[13px] text-zinc-400 leading-relaxed">{displayText}</p>
                       ) : null}
-                      {isLatestAssistant ? (
-                        <TypewriterText key={displayText} text={displayText} speed={14} />
-                      ) : displayText}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {turn.outfitCards.map((card, idx) => (
+                          <FeedOutfitCard
+                            key={idx}
+                            card={card}
+                            index={idx}
+                            userGender={userGender}
+                            userSkinTone={userSkinTone}
+                            userBodyShape={userBodyShape}
+                            userHeight={userHeight}
+                            userStylePref={userStylePref}
+                            language={lang}
+                            isAr={isAr}
+                          />
+                        ))}
+                      </div>
                     </div>
+                  )
+                }
+
+                // Assistant with generated outfit images
+                if (turn.generatedOutfit) {
+                  return (
+                    <div key={index} className="flex flex-col gap-3">
+                      {displayText ? (
+                        <p className="text-[13px] text-zinc-300 leading-relaxed">{displayText}</p>
+                      ) : null}
+                      <div className="grid grid-cols-2 gap-3 max-w-xs">
+                        <div className="group cursor-pointer" onClick={() => handleInlineGeneratedTap(turn.generatedOutfit, 'primary')}>
+                          <div className="relative w-full aspect-[3/4] overflow-hidden rounded-xl bg-zinc-900 border border-zinc-800/50 transition-all duration-300 group-hover:scale-[1.01] shadow-sm">
+                            {turn.generatedOutfit.image_url ? (
+                              <GeneratedOutfitImage src={turn.generatedOutfit.image_url} alt="" className="w-full h-full object-cover object-top opacity-85 hover:opacity-100 transition-opacity duration-300" />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center"><span className="text-zinc-800 text-[8px] uppercase tracking-widest">{noImageLabel}</span></div>
+                            )}
+                          </div>
+                          <p className="mt-1 text-[8px] uppercase tracking-wider text-zinc-500 truncate">{translateFeedText(turn.generatedOutfit.outfit?.style || turn.generatedOutfit.outfit?.outfit_name)}</p>
+                        </div>
+                        {turn.generatedOutfit.outfit?.alternative && (
+                          <div className="group cursor-pointer" onClick={() => handleInlineGeneratedTap(turn.generatedOutfit, 'alternative')}>
+                            <div className="relative w-full aspect-[3/4] overflow-hidden rounded-xl bg-zinc-900 border border-zinc-800/50 transition-all duration-300 group-hover:scale-[1.01] shadow-sm">
+                              {turn.generatedOutfit.alternative_image_url ? (
+                                <GeneratedOutfitImage src={turn.generatedOutfit.alternative_image_url} alt="" className="w-full h-full object-cover object-top opacity-85 hover:opacity-100 transition-opacity duration-300" />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center"><span className="text-zinc-800 text-[8px] uppercase tracking-widest">{noImageLabel}</span></div>
+                              )}
+                              <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-full bg-black/60 text-[7px] uppercase tracking-widest text-zinc-400 border border-zinc-800">Alt</span>
+                            </div>
+                            <p className="mt-1 text-[8px] uppercase tracking-wider text-zinc-500 truncate">{translateFeedText(turn.generatedOutfit.outfit.alternative.style || turn.generatedOutfit.outfit.alternative.outfit_name)}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                }
+
+                // Generating skeleton
+                if (!isUser && generatingOutfit && index === chatHistory.length - 1) {
+                  return (
+                    <div key={index} className="flex flex-col gap-3">
+                      {displayText ? <p className="text-[13px] text-zinc-400 leading-relaxed">{displayText}</p> : null}
+                      <div className="grid grid-cols-2 gap-3 max-w-xs">
+                        {[0, 1].map((v) => (
+                          <div key={v}>
+                            <div className="relative w-full aspect-[3/4] overflow-hidden rounded-xl skeleton shadow-sm" />
+                            <div className="mt-1.5 h-2 rounded-full skeleton w-2/3" />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                }
+
+                // Default: plain text response + colors
+                return (
+                  <div key={index} className="flex flex-col gap-3">
+                    {displayText ? (
+                      <p className="text-[13px] text-zinc-300 leading-relaxed whitespace-pre-line">{displayText}</p>
+                    ) : null}
+                    {turn.colors && turn.colors.length > 0 && (
+                      <div>
+                        <p className="text-[8px] uppercase tracking-[0.25em] text-zinc-600 mb-2">{isAr ? 'لوحة ألوانك' : 'Your colour palette'}</p>
+                        <div className="flex flex-wrap gap-2">
+                          {turn.colors.map((color) => (
+                            <div key={`${color.hex}-${color.name}`} className="flex flex-col items-center gap-0.5">
+                              <div className="w-7 h-7 rounded-full border border-zinc-800/80 shadow-sm" style={{ backgroundColor: color.hex }} title={color.name} />
+                              <span className="text-[7px] text-zinc-600 text-center leading-tight max-w-[32px] truncate">{color.name}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )
               })}
 
-              {/* Colour palette under the latest assistant bubble */}
-              {!isThinking && finalBanner?.colors?.length ? (
-                <div className="ml-8 animate-in fade-in duration-500" style={{ animationDelay: '700ms', animationFillMode: 'both' }}>
-                  <p className="text-[9px] uppercase tracking-[0.3em] text-zinc-600 mb-2">{isAr ? 'لوحة ألوانك' : 'Your colour palette'}</p>
-                  <div className="flex flex-wrap gap-2">
-                    {finalBanner.colors.map((color) => (
-                      <div key={`${color.hex}-${color.name}`} className="flex flex-col items-center gap-1">
-                        <div className="w-8 h-8 rounded-full border border-zinc-800/80" style={{ backgroundColor: color.hex }} title={color.name} />
-                        <span className="text-[8px] text-zinc-600 text-center leading-tight max-w-[36px] truncate">{color.name}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-
               {/* Clarification chips — shown as quick-reply options */}
-              {!isThinking && attachmentTurns.length === 0 && aiContext?.needs_clarification ? (
-                <div className="ml-8 flex flex-wrap gap-2 animate-in fade-in duration-500" style={{ animationDelay: '400ms', animationFillMode: 'both' }}>
+              {!isThinking && !attachmentChat && aiContext?.needs_clarification ? (
+                <div className="flex flex-wrap gap-2 animate-in fade-in duration-500" style={{ animationDelay: '400ms', animationFillMode: 'both' }}>
                   {(isAr ? ['كاجوال أنيق', 'رسمي / عمل', 'نهاية الأسبوع', 'سهرة', 'إطلالة صيفية'] : ['Smart Casual', 'Formal / Work', 'Weekend Casual', 'Night Out', 'Summer Look']).map((chip) => (
                     <button
                       key={chip}
@@ -904,8 +1198,8 @@ function FeedContent() {
               ) : null}
 
               {/* Follow-up chips after a successful response */}
-              {!isThinking && attachmentTurns.length === 0 && !aiContext?.needs_clarification && chatHistory.length >= 2 && finalBanner && !generatingOutfit ? (
-                <div className="ml-8 flex flex-wrap gap-2 animate-in fade-in duration-500" style={{ animationDelay: '1000ms', animationFillMode: 'both' }}>
+              {!isThinking && !attachmentChat && !aiContext?.needs_clarification && chatHistory.length >= 2 && finalBanner && !generatingOutfit ? (
+                <div className="flex flex-wrap gap-2 animate-in fade-in duration-500" style={{ animationDelay: '1000ms', animationFillMode: 'both' }}>
                   {(isAr ? ['أكثر رسمية', 'أكثر كاجوال', 'ألوان مختلفة', 'نسخة صيفية', 'نسخة للسهرة'] : ['More formal', 'More casual', 'Different colours', 'Summer version', 'Night out version']).map((chip) => (
                     <button
                       key={chip}
@@ -919,8 +1213,8 @@ function FeedContent() {
               ) : null}
 
               {/* Image follow-up chips */}
-              {!isThinking && !isAnalyzingAttachment && attachmentChat && attachmentTurns.length > 0 ? (
-                <div className="ml-8 flex flex-wrap gap-2 animate-in fade-in duration-500" style={{ animationDelay: '350ms', animationFillMode: 'both' }}>
+              {!isThinking && !isAnalyzingAttachment && attachmentChat && chatHistory.length > 0 ? (
+                <div className="flex flex-wrap gap-2 animate-in fade-in duration-500" style={{ animationDelay: '350ms', animationFillMode: 'both' }}>
                   {attachmentFollowUpChips.map((chip) => (
                     <button
                       key={chip}
@@ -933,10 +1227,9 @@ function FeedContent() {
                 </div>
               ) : null}
 
-
               {/* Advice mode curate button */}
-              {!isThinking && attachmentTurns.length === 0 && aiContext?.mode === 'advice' && !generatingOutfit && !generatedOutfit ? (
-                <div className="ml-8 animate-in fade-in duration-700" style={{ animationDelay: '1200ms', animationFillMode: 'both' }}>
+              {!isThinking && !attachmentChat && aiContext?.mode === 'advice' && !generatingOutfit && !generatedOutfit ? (
+                <div className="animate-in fade-in duration-700" style={{ animationDelay: '1200ms', animationFillMode: 'both' }}>
                   {!curateTriggered ? (
                     <button
                       onClick={triggerCuration}
@@ -945,29 +1238,28 @@ function FeedContent() {
                       {isAr ? 'نعم، نسّقها لي ←' : 'Yes, curate for me →'}
                     </button>
                   ) : (
-                    <p className="text-zinc-600 text-[10px] uppercase tracking-widest animate-pulse">{isAr ? 'جارٍ بناء إطلالتك...' : 'Building your look...'}</p>
+                    <p className="text-zinc-650 text-[10px] uppercase tracking-widest animate-pulse">{isAr ? 'جارٍ بناء إطلالتك...' : 'Building your look...'}</p>
                   )}
                 </div>
               ) : null}
 
-              {/* Pending user bubble (chip tap or typed query — shown while AI thinks) */}
+              {/* Pending user bubble */}
               {pendingUserMessage ? (
                 <div className="flex justify-end">
-                  <div className="max-w-[78%] px-4 py-2.5 rounded-2xl rounded-br-sm bg-zinc-800 text-white text-[13px] leading-relaxed">
+                  <div className="px-4 py-2 rounded-2xl rounded-br-sm bg-zinc-800/70 border border-zinc-700/40 text-white text-[13px] leading-relaxed max-w-[70%]">
                     {pendingUserMessage}
                   </div>
                 </div>
               ) : null}
 
-              {/* Typing indicator */}
-              {isThinking || isAnalyzingAttachment ? (
-                <div className="flex items-end gap-2">
-                  <div className="px-4 py-3 rounded-2xl rounded-bl-sm bg-zinc-900/80 border border-zinc-800/60">
-                    <div className="flex gap-[5px] items-center" aria-label={isAr ? 'Elephante يفكر' : 'Elephante is thinking'}>
-                      <span className="w-1.5 h-1.5 rounded-full bg-white/50 animate-bounce" style={{ animationDelay: '0ms' }} />
-                      <span className="w-1.5 h-1.5 rounded-full bg-white/35 animate-bounce" style={{ animationDelay: '150ms' }} />
-                      <span className="w-1.5 h-1.5 rounded-full bg-white/20 animate-bounce" style={{ animationDelay: '300ms' }} />
-                    </div>
+              {/* Thinking indicator */}
+              {(isThinking || isAnalyzingAttachment) ? (
+                <div className="flex items-center gap-2">
+                  <Logo size={14} className="text-zinc-600 animate-pulse" />
+                  <div className="flex gap-[5px] items-center" aria-label={isAr ? 'Elephante يفكر' : 'Elephante is thinking'}>
+                    <span className="w-1.5 h-1.5 rounded-full bg-zinc-600 animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <span className="w-1.5 h-1.5 rounded-full bg-zinc-700 animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <span className="w-1.5 h-1.5 rounded-full bg-zinc-800 animate-bounce" style={{ animationDelay: '300ms' }} />
                   </div>
                 </div>
               ) : null}
@@ -975,132 +1267,6 @@ function FeedContent() {
               <div ref={chatEndRef} />
             </div>
 
-            {/* ── Outfit results ── */}
-            {isSearching && (aiContext?.mode !== 'advice' || generatingOutfit || generatedOutfit) ? (
-              <>
-                {/* Outfit cards (AI-curated, no DB) */}
-                {!isThinking && aiContext?.mode === 'cards' && aiContext.outfit_cards?.length ? (
-                  <>
-                    {weatherData ? (
-                      <p className="mb-4 text-center text-[10px] leading-relaxed text-zinc-600">
-                        {isAr
-                          ? `حسب طقس اليوم في ${weatherDisplay}، تم تنسيق هذه الإطلالات لتناسب الظروف الحالية.`
-                          : `According to today's weather in ${weatherDisplay}, these looks are tuned for the current conditions.`}
-                      </p>
-                    ) : null}
-                    <div className="flex overflow-x-auto gap-4 pb-6 snap-x snap-mandatory -mx-4 px-4 sm:mx-0 sm:px-0 hide-scrollbar">
-                      {aiContext.outfit_cards.map((card, index) => (
-                        <div key={`${card.outfit_name}-${index}`} className="snap-center shrink-0 w-[85vw] sm:w-[320px]">
-                          <FeedOutfitCard
-                            card={card}
-                            index={index}
-                            userGender={userGender}
-                            userSkinTone={userSkinTone}
-                            userBodyShape={userBodyShape}
-                            userHeight={userHeight}
-                            userStylePref={userStylePref}
-                            language={lang}
-                            isAr={isAr}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                ) : null}
-
-                {/* Thinking skeleton */}
-                {isThinking ? (
-                  <div className="flex overflow-x-auto gap-4 pb-6 snap-x snap-mandatory -mx-4 px-4 sm:mx-0 sm:px-0 hide-scrollbar">
-                    {[0, 1, 2].map((value) => (
-                      <div key={value} className="snap-center shrink-0 w-[85vw] sm:w-[320px]">
-                        <div className="rounded-2xl bg-zinc-950/70 border border-white/8 overflow-hidden animate-pulse h-full min-h-[300px]">
-                          <div className="p-4 space-y-3">
-                            <div className="h-3 rounded-full skeleton w-2/5" />
-                            <div className="h-2 rounded-full skeleton w-1/4 mt-1" />
-                            <div className="space-y-2 pt-1">
-                              <div className="h-2 rounded-full skeleton w-full" />
-                              <div className="h-2 rounded-full skeleton w-full" />
-                              <div className="h-2 rounded-full skeleton w-3/4" />
-                            </div>
-                            <div className="h-9 rounded-xl skeleton w-full mt-2" />
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-
-                {/* Generated outfit (advice mode curation / humor) */}
-                {!isThinking && (generatingOutfit || generatedOutfit) && aiContext?.mode !== 'cards' ? (
-                  <>
-                    <div className="flex items-center gap-3 mb-5">
-                      <div className="h-px bg-zinc-900 flex-1" />
-                      <span className="text-zinc-700 text-[9px] uppercase tracking-widest">
-                        {generatingOutfit
-                          ? (isAr ? 'جارٍ إنشاء إطلالتك...' : 'Creating your look...')
-                          : (isAr ? 'إطلالة مولّدة' : 'Generated look')}
-                      </span>
-                      <div className="h-px bg-zinc-900 flex-1" />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-y-5 sm:gap-y-6 gap-x-3 sm:gap-x-4">
-                      {generatingOutfit ? (
-                        <>
-                          {[0, 1].map((value) => (
-                            <div key={value} className="group">
-                              <div className="relative w-full aspect-[3/4] overflow-hidden rounded-xl sm:rounded-2xl skeleton" />
-                              <div className="mt-2 h-2 rounded-full skeleton w-2/3" />
-                            </div>
-                          ))}
-                        </>
-                      ) : null}
-
-                      {!generatingOutfit && generatedOutfit ? (
-                        <>
-                          <div className="group cursor-pointer" style={{ opacity: 0, animation: 'cardIn 0.45s ease forwards', animationDelay: '0ms' }} onClick={() => handleGeneratedTap('primary')}>
-                            <div className="relative w-full aspect-[3/4] overflow-hidden rounded-xl sm:rounded-2xl bg-zinc-900 transition-transform duration-300 group-hover:scale-[1.02] group-active:scale-[0.98]">
-                              {generatedOutfit.image_url ? (
-                                <GeneratedOutfitImage src={generatedOutfit.image_url} alt={generatedOutfit.outfit?.outfit_name || (isAr ? 'إطلالة مولّدة' : 'Generated outfit')} className="w-full h-full object-cover object-top opacity-75 group-hover:opacity-100 transition-opacity duration-400" />
-                              ) : (
-                                <div className="w-full h-full flex items-center justify-center"><span className="text-zinc-800 text-[9px] uppercase tracking-widest">{noImageLabel}</span></div>
-                              )}
-                            </div>
-                            {generatedOutfit.outfit?.style || generatedOutfit.outfit?.outfit_name ? (
-                              <p className="mt-1.5 text-[9px] uppercase tracking-[0.2em] text-zinc-600 group-hover:text-zinc-400 truncate px-0.5 transition-colors duration-200">
-                                {translateFeedText(generatedOutfit.outfit?.style || generatedOutfit.outfit?.outfit_name)}
-                              </p>
-                            ) : null}
-                            {weatherData && generatedOutfit.outfit?.when_to_wear ? (
-                              <p className="mt-1 text-[10px] text-zinc-500 leading-snug px-0.5 line-clamp-2">
-                                {generatedOutfit.outfit.when_to_wear}
-                              </p>
-                            ) : null}
-                          </div>
-
-                          {generatedOutfit.outfit?.alternative ? (
-                            <div className="group cursor-pointer" style={{ opacity: 0, animation: 'cardIn 0.45s ease forwards', animationDelay: '80ms' }} onClick={() => handleGeneratedTap('alternative')}>
-                              <div className="relative w-full aspect-[3/4] overflow-hidden rounded-xl sm:rounded-2xl bg-zinc-900 transition-transform duration-300 group-hover:scale-[1.02] group-active:scale-[0.98]">
-                                {generatedOutfit.alternative_image_url ? (
-                                  <GeneratedOutfitImage src={generatedOutfit.alternative_image_url} alt={generatedOutfit.outfit.alternative?.outfit_name || (isAr ? 'إطلالة مقترحة' : 'Suggested outfit')} className="w-full h-full object-cover opacity-75 group-hover:opacity-100 transition-opacity duration-400" />
-                                ) : (
-                                  <div className="w-full h-full flex items-center justify-center"><span className="text-zinc-800 text-[9px] uppercase tracking-widest">{noImageLabel}</span></div>
-                                )}
-                                <span className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-black/60 text-[8px] uppercase tracking-widest text-zinc-400 border border-zinc-800/60">Alt</span>
-                              </div>
-                              {generatedOutfit.outfit.alternative?.style || generatedOutfit.outfit.alternative?.outfit_name ? (
-                                <p className="mt-1.5 text-[9px] uppercase tracking-[0.2em] text-zinc-600 group-hover:text-zinc-400 truncate px-0.5 transition-colors duration-200">
-                                  {translateFeedText(generatedOutfit.outfit.alternative?.style || generatedOutfit.outfit.alternative?.outfit_name)}
-                                </p>
-                              ) : null}
-                            </div>
-                          ) : null}
-                        </>
-                      ) : null}
-                    </div>
-                  </>
-                ) : null}
-              </>
-            ) : null}
           </div>
         ) : null}
       </div>
@@ -1116,7 +1282,6 @@ function FeedContent() {
           setAttachmentAnalysisMode(null)
           setAttachmentChat(null)
           setAttachmentSuggestions([])
-          setAttachmentTurns([])
           await handleAttachment(event)
         }}
         handleAttachmentFile={attachPhotoFile}
@@ -1125,6 +1290,7 @@ function FeedContent() {
         isThinking={isThinking}
         keyboardOffset={kbOffset}
         onAnalyzeAttachment={() => handleAnalyzeAttachment(inputValue, 'rating')}
+        onAnalyzeWithAIServer={analyzeWithAIServer}
         onRateAttachment={() => handleAnalyzeAttachment(inputValue, 'rating')}
         onFindSimilar={() => handleQuickCurate('similar')}
         onRestyle={() => handleQuickCurate('different')}
@@ -1134,7 +1300,6 @@ function FeedContent() {
           if (attachmentAnalysis) setAttachmentAnalysis(null)
           if (attachmentAnalysisMode) setAttachmentAnalysisMode(null)
           if (attachmentSuggestions.length) setAttachmentSuggestions([])
-          if (attachmentTurns.length) setAttachmentTurns([])
           if (value === '') {
             setSearchQuery('')
             setPendingUserMessage('')
@@ -1143,7 +1308,6 @@ function FeedContent() {
             setAttachmentAnalysisMode(null)
             setAttachmentChat(null)
             setAttachmentSuggestions([])
-            setAttachmentTurns([])
             clearActiveSearchState()
           }
         }}
@@ -1155,17 +1319,30 @@ function FeedContent() {
             void handleAnalyzeAttachment(q, mode)
             return
           }
-          if (attachmentChat && attachmentTurns.length > 0) {
+          if (attachmentChat && chatHistory.length > 0) {
             if (!q) return
             void handleAnalyzeAttachment(q, 'question')
             return
           }
           if (!q) return
+          // Intercept buy-intent follow-ups when outfit cards are already on screen
+          const hasOutfitCards = chatHistory.some(t => t.outfitCards && t.outfitCards.length > 0)
+          if (hasBuyFollowUp(q) && hasOutfitCards) {
+            const hint = isAr
+              ? 'لرؤية روابط التسوق لكل قطعة والعثور على متاجر قريبة، انقر على "المزيد ←" في أي بطاقة إطلالة أعلاه.'
+              : 'Tap MORE → on any outfit card above to see shop links for each piece and find nearby stores where you can buy or get it tailored.'
+            setChatHistory(prev => [
+              ...prev,
+              { role: 'user', content: q },
+              { role: 'assistant', content: hint },
+            ])
+            setInputValue('')
+            return
+          }
           setAttachmentAnalysis(null)
           setAttachmentAnalysisMode(null)
           setAttachmentChat(null)
           setAttachmentSuggestions([])
-          setAttachmentTurns([])
           setPendingUserMessage(q)
           setSearchQuery(q)
           setInputValue('')

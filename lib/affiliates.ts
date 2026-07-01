@@ -2,7 +2,7 @@
 
 export type Gender = 'male' | 'female'
 
-// Strip fabric/fit jargon so the search query actually returns results
+// Strip fabric/fit jargon so search queries return useful results
 function cleanQuery(item: string): string {
   return item
     .replace(/\b(slim-fit|straight-fit|relaxed-fit|wide-leg|tapered|fitted|oversized|cropped|high-waist|low-rise|mid-rise|regular-fit|classic-fit)\b/gi, '')
@@ -13,7 +13,7 @@ function cleanQuery(item: string): string {
     .replace(/\s+/g, ' ')
 }
 
-// Brand → gender-aware search URL
+// Brand → gender-aware official search URL
 const BRAND_SEARCH: Record<string, (q: string, g: Gender) => string> = {
   'Zara': (q, g) =>
     g === 'male'
@@ -42,11 +42,6 @@ const BRAND_SEARCH: Record<string, (q: string, g: Gender) => string> = {
     g === 'male'
       ? `https://shop.mango.com/us/men/search?q=${q}`
       : `https://shop.mango.com/us/women/search?q=${q}`,
-
-  'ASOS': (q, g) =>
-    g === 'male'
-      ? `https://www.asos.com/men/search/?q=${q}`
-      : `https://www.asos.com/women/search/?q=${q}`,
 
   'River Island': (q, g) =>
     g === 'male'
@@ -149,11 +144,132 @@ const BRAND_SEARCH: Record<string, (q: string, g: Gender) => string> = {
     g === 'male'
       ? `https://arcteryx.com/us/en/c/mens?q=${q}`
       : `https://arcteryx.com/us/en/c/womens?q=${q}`,
+
+  'Massimo Dutti': (q, g) =>
+    g === 'male'
+      ? `https://www.massimodutti.com/us/en/search?searchTerm=${q}&section=MAN`
+      : `https://www.massimodutti.com/us/en/search?searchTerm=${q}&section=WOMAN`,
+
+  'GAP': (q, g) =>
+    g === 'male'
+      ? `https://www.gap.com/browse/search.do?searchText=${q}&department=1`
+      : `https://www.gap.com/browse/search.do?searchText=${q}&department=2`,
+
+  'Gap': (q, g) =>
+    g === 'male'
+      ? `https://www.gap.com/browse/search.do?searchText=${q}&department=1`
+      : `https://www.gap.com/browse/search.do?searchText=${q}&department=2`,
+
+  'Banana Republic': (q, g) =>
+    g === 'male'
+      ? `https://bananarepublic.gap.com/browse/search.do?searchText=${q}&department=1`
+      : `https://bananarepublic.gap.com/browse/search.do?searchText=${q}&department=2`,
+
+  'J.Crew': (q) =>
+    `https://www.jcrew.com/search?Ntt=${q}`,
+
+  'BOSS': (q, g) =>
+    g === 'male'
+      ? `https://www.hugoboss.com/us/men/search?q=${q}`
+      : `https://www.hugoboss.com/us/women/search?q=${q}`,
+
+  'Hugo Boss': (q, g) =>
+    g === 'male'
+      ? `https://www.hugoboss.com/us/men/search?q=${q}`
+      : `https://www.hugoboss.com/us/women/search?q=${q}`,
+
+  'Calvin Klein': (q, g) =>
+    g === 'male'
+      ? `https://www.calvinklein.us/en_US/search?searchText=${q}&prefn1=gender&prefv1=Mens`
+      : `https://www.calvinklein.us/en_US/search?searchText=${q}&prefn1=gender&prefv1=Womens`,
+
+  'Patagonia': (q) =>
+    `https://www.patagonia.com/search/?q=${q}`,
+
+  'The North Face': (q, g) =>
+    g === 'male'
+      ? `https://www.thenorthface.com/en-us/mens?q=${q}`
+      : `https://www.thenorthface.com/en-us/womens?q=${q}`,
+
+  'Columbia': (q, g) =>
+    g === 'male'
+      ? `https://www.columbia.com/search?q=${q}&prefn1=gender&prefv1=Men`
+      : `https://www.columbia.com/search?q=${q}&prefn1=gender&prefv1=Women`,
+    'Gucci': (q, g) =>
+      g === 'male' ? `https://www.gucci.com/us/en/search?query=${q}` : `https://www.gucci.com/us/en/search?query=${q}`,
+    'Prada': (q, g) =>
+      g === 'male' ? `https://www.prada.com/us/en/search?q=${q}` : `https://www.prada.com/us/en/search?q=${q}`,
+    'Louis Vuitton': (q, g) =>
+      g === 'male' ? `https://www.louisvuitton.com/usa-en/search?text=${q}` : `https://www.louisvuitton.com/usa-en/search?text=${q}`,
+    'Chanel': (q, g) =>
+      g === 'male' ? `https://www.chanel.com/us/fragrances-beauty/?query=${q}` : `https://www.chanel.com/us/fragrances-beauty/?query=${q}`,
+    'Dior': (q, g) =>
+      g === 'male' ? `https://www.dior.com/en_us/fragrances-and-beauty/search?q=${q}` : `https://www.dior.com/en_us/fragrances-and-beauty/search?q=${q}`,
+    'Burberry': (q, g) =>
+      g === 'male' ? `https://us.burberry.com/shop/search?q=${q}` : `https://us.burberry.com/shop/search?q=${q}`,
+    'Versace': (q, g) =>
+      g === 'male' ? `https://www.versace.com/us/en/search?q=${q}` : `https://www.versace.com/us/en/search?q=${q}`,
+    'Armani': (q, g) =>
+      g === 'male' ? `https://www.armani.com/us/en/search?q=${q}` : `https://www.armani.com/us/en/search?q=${q}`,
+    'YSL': (q, g) =>
+      g === 'male' ? `https://www.ysl.com/us/en/search?q=${q}` : `https://www.ysl.com/us/en/search?q=${q}`,
+    'Balenciaga': (q, g) =>
+      g === 'male' ? `https://www.balenciaga.com/us/search?q=${q}` : `https://www.balenciaga.com/us/search?q=${q}`,
+    'Alexander McQueen': (q, g) =>
+      g === 'male' ? `https://www.alexandermcqueen.com/us/search?q=${q}` : `https://www.alexandermcqueen.com/us/search?q=${q}`,
+    'Givenchy': (q, g) =>
+      g === 'male' ? `https://www.givenchy.com/us/en/search?q=${q}` : `https://www.givenchy.com/us/en/search?q=${q}`,
+    'Valentino': (q, g) =>
+      g === 'male' ? `https://www.valentino.com/us/en/search?q=${q}` : `https://www.valentino.com/us/en/search?q=${q}`,
 }
 
 export interface ShopLink {
-  url:   string
+  url: string
   label: string
+}
+
+export function detectBrandInText(text: string): string | null {
+  const lower = text.toLowerCase()
+  const sorted = Object.keys(BRAND_SEARCH).sort((a, b) => b.length - a.length)
+  for (const brand of sorted) {
+    if (lower.includes(brand.toLowerCase())) return brand
+  }
+  return null
+}
+
+// Maps piece type keywords to the best authentic brand for that category
+const CATEGORY_RULES: Array<{ keywords: RegExp; brand: string }> = [
+  { keywords: /\b(cashmere|merino|knit|knitwear|crew.?neck|crewneck|sweater|jumper|pullover|turtleneck)\b/i, brand: 'Uniqlo' },
+  { keywords: /\b(jeans?|denim)\b/i, brand: "Levi's" },
+  { keywords: /\b(sneakers?|trainers?|running shoes?|athletic shoes?|sport shoes?)\b/i, brand: 'Nike' },
+  { keywords: /\b(chelsea boots?|combat boots?|ankle boots?)\b/i, brand: 'Dr. Martens' },
+  { keywords: /\b(boots?)\b/i, brand: 'Timberland' },
+  { keywords: /\b(loafers?|oxfords?|derby|brogues?|dress shoes?|leather shoes?)\b/i, brand: 'Zara' },
+  { keywords: /\b(coat|overcoat|trench|parka|puffer|mac)\b/i, brand: 'H&M' },
+  { keywords: /\b(blazer)\b/i, brand: 'Zara' },
+  { keywords: /\b(suit|tailored jacket)\b/i, brand: 'Massimo Dutti' },
+  { keywords: /\b(polo)\b/i, brand: 'Ralph Lauren' },
+  { keywords: /\b(shirt|button.?up|button.?down|oxford shirt|chambray|poplin)\b/i, brand: 'COS' },
+  { keywords: /\b(t.?shirt|tee|graphic tee)\b/i, brand: 'Uniqlo' },
+  { keywords: /\b(watch|belt|wallet|scarf|tie|pocket square)\b/i, brand: 'Zara' },
+  { keywords: /\b(bag|tote|backpack|clutch)\b/i, brand: 'Zara' },
+  { keywords: /\b(trousers?|chinos?|slacks?|dress pants?)\b/i, brand: 'Zara' },
+  { keywords: /\b(shorts?)\b/i, brand: 'H&M' },
+  { keywords: /\b(hoodie|sweatshirt|sweatpants?|joggers?|tracksuit)\b/i, brand: 'Nike' },
+  { keywords: /\b(dress|skirt)\b/i, brand: 'Zara' },
+  { keywords: /\b(jacket|windbreaker|gilet|vest)\b/i, brand: 'H&M' },
+]
+
+// Returns a brand link using category-based matching when no brand is detected
+export function getCategoryBrandLink(pieceText: string, gender: Gender = 'male'): ShopLink {
+  const q = encodeURIComponent(cleanQuery(pieceText))
+  for (const rule of CATEGORY_RULES) {
+    if (rule.keywords.test(pieceText)) {
+      const urlFn = BRAND_SEARCH[rule.brand]
+      if (urlFn) return { url: urlFn(q, gender), label: rule.brand }
+    }
+  }
+  return { url: BRAND_SEARCH['Zara']!(q, gender), label: 'Zara' }
 }
 
 export function getBrandShopLink(
@@ -176,15 +292,11 @@ export function getBrandShopLink(
   )
   if (key) {
     const buildUrl = BRAND_SEARCH[key]
-    if (buildUrl) {
-      return { url: buildUrl(q, gender), label: key }
-    }
+    if (buildUrl) return { url: buildUrl(q, gender), label: key }
   }
 
-  // Unknown brand — fall back to ASOS gender section
-  const fallback = gender === 'male'
-    ? `https://www.asos.com/men/search/?q=${encodeURIComponent(brand + ' ' + cleanQuery(itemDescription))}`
-    : `https://www.asos.com/women/search/?q=${encodeURIComponent(brand + ' ' + cleanQuery(itemDescription))}`
-
-  return { url: fallback, label: brand }
+  // Unknown brand not in our map — return with brand name so we can show a label,
+  // but keep the URL as category-based (authentic brand website)
+  const categoryLink = getCategoryBrandLink(itemDescription, gender)
+  return { url: categoryLink.url, label: brand }
 }

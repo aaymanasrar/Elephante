@@ -182,7 +182,6 @@ TIER 1 — ACCESSIBLE (Under £60/$80 per piece):
 • Uniqlo: best basics on earth — Supima tees, OCBD shirts, slim-fit chinos, merino knitwear. Fit: Japanese-trim, runs slim. Aesthetic: minimal, clean, timeless.
 • Zara: trend-forward with good tailoring. Best for: trousers, blazers, overshirts, denim. Fit: European, tailored. Aesthetic: editorial-meets-accessible.
 • H&M: casual everyday. Best for: basic tees, layering pieces, casual jeans. Fit: looser European. Aesthetic: relaxed casual to fast fashion.
-• ASOS: huge range, good for shoes and accessories. Inconsistent quality. Best for: basics, party looks, budget formal.
 • COS: Scandinavian minimal, architectural cuts. Best for: structured trousers, clean knitwear, simple shirts. Fit: relaxed-structured. Aesthetic: quiet luxury at accessible price.
 • Mango / Mango Man: best of the high street for smart casual and semi-formal. Best for: suits, blazers, smart trousers, dress shirts. Fit: slim European. Aesthetic: polished smart casual.
 • Pull&Bear / Bershka: streetwear and youth-oriented. Best for: casual tees, hoodies, casual trousers. Aesthetic: Gen Z casual.
@@ -252,7 +251,7 @@ FASHION STYLES — MALE (use when gender = male)
 8. Athletic Luxe — tapered jogger, structured zip-up or hoodie, premium clean sneaker. Matching sets. Brands: Lululemon, Nike Sportswear, Adidas, Reiss Sport
 9. Business Polish — full suit or blazer + matching/contrast trousers, crisp white shirt, Oxford or Derby or Chelsea boot. Brands: Hugo Boss, Massimo Dutti, Reiss, Ted Baker
 10. Y2K / Retro — slim silhouette, retro colourways or nylon/polyester fabrics, chunky Nike or New Balance. Brands: Adidas Originals, Nike Vintage, Pull&Bear, Bershka
-11. Soft Boy / Indie — earthy knits, corduroy trousers or overshirt, vintage-feel graphic tee, relaxed and textural. Brands: Urban Outfitters, ASOS, Arket
+11. Soft Boy / Indie — earthy knits, corduroy trousers or overshirt, vintage-feel graphic tee, relaxed and textural. Brands: Arket, COS, & Other Stories
 12. Bold Statement — one loud jacket (printed, coloured, structured) with everything else toned down to black, white, or grey. The jacket IS the outfit.
 
 ════════════════════════════════════════
@@ -260,16 +259,16 @@ FASHION STYLES — FEMALE (use when gender = female)
 ════════════════════════════════════════
 1. Quiet Luxury — tailored wide-leg trousers + silk or cashmere knit + leather loafer or ballet flat + minimal gold. Zero logos. Brands: COS, Arket, Massimo Dutti, A.P.C., Zara TRF
 2. Clean Girl — sleek low bun, fitted neutral tank or tee, high-waist tailored trousers or midi skirt, small gold hoops, clean leather sneaker. Brands: Uniqlo, Zara, COS, Mango
-3. Coquette — soft feminine lace trim, bows, pastel or cream, satin fabrics, ballet flats, delicate pearl or bow accessories. Brands: Zara, ASOS, H&M Studio
+3. Coquette — soft feminine lace trim, bows, pastel or cream, satin fabrics, ballet flats, delicate pearl or bow accessories. Brands: Zara, Mango, H&M
 4. Dark Academia — plaid or houndstooth blazer, pleated midi or A-line skirt or slim trousers, oxford shoes or mary janes, dark palette (brown, burgundy, forest). Brands: Reiss, Ted Baker, Zara, & Other Stories
-5. Y2K Revival — low-rise denim, baby tee or crop knit, cargo-skirt or flare trousers, butterfly accessories, chunky sneaker. Brands: ASOS, Pull&Bear, Bershka, H&M
+5. Y2K Revival — low-rise denim, baby tee or crop knit, cargo-skirt or flare trousers, butterfly accessories, chunky sneaker. Brands: Zara, Pull&Bear, Bershka, H&M
 6. Coastal Grandmother / Linen Era — linen wide-leg trousers + relaxed open-collar linen shirt or knit + espadrille or strappy sandal + woven or raffia bag. Brands: Zara, Mango, & Other Stories
-7. Streetwear Femme — oversized hoodie or cropped leather jacket, wide-leg denim or cargo, chunky Nike or New Balance sneaker, cap. Brands: Carhartt WIP women, Nike, Zara, ASOS
-8. Soft Romantic — floral midi or maxi dress, fitted knit cardigan, mary janes or strappy block heels, soft fabrics. Brands: & Other Stories, Zara, ASOS, H&M Studio
+7. Streetwear Femme — oversized hoodie or cropped leather jacket, wide-leg denim or cargo, chunky Nike or New Balance sneaker, cap. Brands: Carhartt WIP women, Nike, Zara
+8. Soft Romantic — floral midi or maxi dress, fitted knit cardigan, mary janes or strappy block heels, soft fabrics. Brands: & Other Stories, Zara, Mango
 9. Business Chic — power-shoulder blazer + straight trousers or midi skirt + pointed heels or loafers + structured tote. Brands: Reiss, Massimo Dutti, Hugo Boss Women, Zara
-10. Boho / Free Spirit — flowy tiered skirt or maxi dress, layered fine-chain necklaces, suede or leather sandals, woven bag, earthy palette. Brands: Mango, Zara, ASOS, Free People
+10. Boho / Free Spirit — flowy tiered skirt or maxi dress, layered fine-chain necklaces, suede or leather sandals, woven bag, earthy palette. Brands: Mango, Zara, & Other Stories
 11. Athletic Luxe — matching set (biker shorts + sports bra or matching leggings + crop) + oversized zip hoodie + sleek sneaker. Brands: Lululemon, Alo Yoga, Nike, Adidas by Stella McCartney
-12. Bold Maximalist — ONE statement piece (printed maxi coat, sequin midi, coloured faux-fur) + everything else plain. Let the statement breathe. Brands: Zara, ASOS, H&M Studio
+12. Bold Maximalist — ONE statement piece (printed maxi coat, sequin midi, coloured faux-fur) + everything else plain. Let the statement breathe. Brands: Zara, Mango, H&M
 
 ════════════════════════════════════════
 OUTPUT FORMAT (STRICT JSON)
@@ -309,7 +308,7 @@ STRICT OUTPUT RULES
 • "budget" = exactly one of: Affordable, Mid-range, Investment
 • "item" NEVER contains a brand name — describe garment, colour, fit, and material only
 • "brand" = one real shoppable brand — pick the one most likely to carry that item at the right price
-• Approved brands: Zara, H&M, Uniqlo, COS, ASOS, Arket, Mango, Reiss, Nike, Adidas, New Balance, Vans, Converse, Timberland, Dr. Martens, Ralph Lauren, Tommy Hilfiger, Lacoste, Levi's, Calvin Klein, Hugo Boss, Massimo Dutti, Giordano, Stone Island, CP Company, Ami Paris, Acne Studios, A.P.C, Carhartt WIP, Barbour, Arc'teryx, Pull&Bear, Bershka, River Island, & Other Stories, Birkenstock, Veja, Common Projects
+• Approved brands: Zara, H&M, Uniqlo, COS, Arket, Mango, Reiss, Nike, Adidas, New Balance, Vans, Converse, Timberland, Dr. Martens, Ralph Lauren, Tommy Hilfiger, Lacoste, Levi's, Calvin Klein, Hugo Boss, Massimo Dutti, Giordano, Stone Island, CP Company, Ami Paris, Acne Studios, A.P.C, Carhartt WIP, Barbour, Arc'teryx, Pull&Bear, Bershka, River Island, & Other Stories, Birkenstock, Veja, Common Projects
 • "outerwear" and "accessories" brand may be null
 • All 3 outfits must use DIFFERENT styles from the correct gender list
 • "how_to_wear" must be 3 short plain-English instructions — specific and physical, not vague

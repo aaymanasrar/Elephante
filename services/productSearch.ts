@@ -1,7 +1,7 @@
 // ─── Product Search & Scraper ─────────────────────────────────────────────────
-// Fetches real products from ASOS's product API (covers 900+ brands).
+// Fetches real products from authentic brand websites only (H&M, Uniqlo, etc.).
 // Results are cached in Supabase for 24 hours to avoid repeated scraping.
-// Fallback: H&M and Uniqlo JSON endpoints for their own-brand items.
+// Fallback: Perplexity Pro Search for live web results from official brand pages.
 
 import { createClient } from '@supabase/supabase-js'
 import { requireEnv } from '@/lib/env'
@@ -42,49 +42,7 @@ async function saveToCache(products: Product[], query: string, gender: string) {
   )
 }
 
-// ─── ASOS product API ─────────────────────────────────────────────────────────
-// ASOS carries 900+ brands — Zara, H&M, Nike, Stone Island, Ralph Lauren, etc.
-// Their internal search API returns structured JSON with direct product URLs.
-async function fetchFromASOS(query: string, gender: string): Promise<Product[]> {
-  const genderParam = gender === 'female' ? 'women' : 'men'
-  const url =
-    `https://www.asos.com/api/product/search/v2/` +
-    `?q=${encodeURIComponent(query)}` +
-    `&channel=desktop-web&country=US&currency=USD&lang=en-US` +
-    `&limit=6&store=US&gender=${genderParam}`
 
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(new DOMException('Timeout', 'AbortError')), 4000)
-  let res: Response
-  try {
-    res = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': 'https://www.asos.com/',
-      },
-      next: { revalidate: 0 },
-    })
-  } catch { return [] } finally { clearTimeout(timer) }
-
-  if (!res.ok) return []
-
-  let data: any
-  try { data = await res.json() } catch { return [] }
-  const items: any[] = data?.products || []
-
-  return items.slice(0, 5).map((item: any) => ({
-    name:      item.name || '',
-    brand:     item.brandName || 'ASOS',
-    price:     item.price?.current?.text || '',
-    url:       item.url ? `https://www.asos.com${item.url}` : '',
-    image_url: item.imageUrl ? `https://images.asos-media.com/products/${item.imageUrl}` : '',
-    gender,
-    category:  '',
-  })).filter(p => p.url)
-}
 
 // ─── H&M product API ──────────────────────────────────────────────────────────
 async function fetchFromHM(query: string, gender: string): Promise<Product[]> {
@@ -236,10 +194,9 @@ Rules:
 // ─── Public API ───────────────────────────────────────────────────────────────
 // Searches for products matching a query + gender.
 // 1. Checks Supabase cache (24h TTL)
-// 2. Falls back to ASOS (primary — covers 900+ brands)
-// 3. Falls back to H&M
-// 4. Falls back to Uniqlo
-// 5. Uses Perplexity Pro Search for live web results when retailer APIs miss
+// 2. Falls back to H&M (authentic brand)
+// 3. Falls back to Uniqlo (authentic brand)
+// 4. Uses Perplexity Pro Search for live web results from official brand pages
 
 export async function searchProducts(
   query: string,
@@ -255,20 +212,15 @@ export async function searchProducts(
   const cached = await getCached(cleanedQuery, gender)
   if (cached) return cached
 
-  // 2. Try ASOS first (broadest coverage)
-  let products = await fetchFromASOS(cleanedQuery, gender)
+  // 2. Try H&M first (authentic brand)
+  let products = await fetchFromHM(cleanedQuery, gender)
 
-  // 3. If ASOS gives nothing, try H&M
-  if (!products.length) {
-    products = await fetchFromHM(cleanedQuery, gender)
-  }
-
-  // 4. If still nothing, try Uniqlo
+  // 3. If H&M gives nothing, try Uniqlo
   if (!products.length) {
     products = await fetchFromUniqlo(cleanedQuery, gender)
   }
 
-  // 5. If retailer APIs miss, ask Perplexity Pro Search for current product pages
+  // 4. If retailer APIs miss, ask Perplexity Pro Search for current product pages from official brand sites
   if (!products.length) {
     products = await fetchFromPerplexity(cleanedQuery, gender, category)
   }

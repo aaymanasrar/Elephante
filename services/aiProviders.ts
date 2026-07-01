@@ -143,6 +143,13 @@ const TEXT_PROVIDERS: TextProvider[] = [
     baseURL: 'https://api.moonshot.ai/v1',
     model:   'moonshot-v1-8k',
   },
+  // ── Tier 2.5: Llama 3.3 (Meta) ───────────────────────────────────────────
+  {
+    name:    'Together (Llama 3.3)',
+    apiKey:  process.env.TOGETHER_API_KEY,
+    baseURL: 'https://api.together.xyz/v1',
+    model:   'meta-llama/Llama-3.3-70b-Instruct-Turbo',
+  },
   // ── Tier 3: Paid fallbacks ────────────────────────────────────────────────
   ...getOpenAIKeys().map((apiKey, index) => ({
     name:    index === 0 ? 'OpenAI' : `OpenAIBackup${index + 1}`,
@@ -352,6 +359,12 @@ export async function analyzeImageWithFallback(
     if (r) return r
   }
 
+  // 1.5. ALLaM-7B Arabic model (cultural fashion tags priority)
+  if (process.env.HUGGINGFACE_API_KEY && (prompt.toLowerCase().includes('cultural') || prompt.toLowerCase().includes('arabic') || prompt.toLowerCase().includes('أرابي'))) {
+    const r = await tryALLaMVision(urls, prompt)
+    if (r) return r
+  }
+
   // 2. Groq
   if (process.env.GROQ_API_KEY) {
     const r = await tryOAI(process.env.GROQ_API_KEY, 'https://api.groq.com/openai/v1', 'meta-llama/llama-4-scout-17b-16e-instruct', 'Groq')
@@ -391,6 +404,17 @@ export async function analyzeImageWithFallback(
       'meta-llama/llama-4-scout',
       'OpenRouter',
       { 'HTTP-Referer': 'https://elephante.app', 'X-OpenRouter-Title': 'Elephante' },
+    )
+    if (r) return r
+  }
+
+  // 5.5. Together AI — Llama Vision
+  if (process.env.TOGETHER_API_KEY) {
+    const r = await tryOAI(
+      process.env.TOGETHER_API_KEY,
+      'https://api.together.xyz/v1',
+      'meta-llama/Llama-3.2-90B-Vision-Instruct-Turbo',
+      'Together (Llama Vision)',
     )
     if (r) return r
   }
@@ -456,6 +480,49 @@ function toAnthropicImageBlock(image: ParsedVisionImage): AnthropicImageBlock {
   return {
     type: 'image',
     source: image.anthropicSource,
+  }
+}
+
+// ─── ALLaM-7B Arabic model via HuggingFace ──────────────────────────────────
+async function tryALLaMVision(
+  imageUrls: string[],
+  prompt: string,
+): Promise<AIResponse | null> {
+  const apiKey = process.env.HUGGINGFACE_API_KEY
+  if (!apiKey) return null
+
+  try {
+    const imageUrlsText = imageUrls.map((url, idx) => `[Image ${idx + 1}]: ${url}`).join('\n')
+    const fullPrompt = `${imageUrlsText}\n\n${prompt}`
+
+    const response = await fetch('https://api-inference.huggingface.co/models/humain-ai/ALLaM-7B-Instruct-preview', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        inputs: fullPrompt,
+        parameters: {
+          max_new_tokens: 2048,
+          temperature: 0.7,
+          top_p: 0.95,
+        },
+      }),
+    })
+
+    if (!response.ok) {
+      const error = await response.text().catch(() => response.statusText)
+      console.warn(`[vision] ALLaM failed: ${response.status} ${error}`)
+      return null
+    }
+
+    const result = await response.json() as any[]
+    const content = result?.[0]?.generated_text || ''
+    return { content, provider: 'ALLaM', model: 'ALLaM-7B-Instruct' }
+  } catch (err: any) {
+    console.warn(`[vision] ALLaM error: ${err.message}`)
+    return null
   }
 }
 

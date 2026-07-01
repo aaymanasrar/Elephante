@@ -37,13 +37,13 @@ function applyTheme(preference: ThemePreference) {
 }
 
 function readStoredPreference(): ThemePreference {
-  if (typeof window === 'undefined') return 'system'
+  if (typeof window === 'undefined') return 'dark'
   const stored = window.localStorage.getItem(STORAGE_KEY)
-  return stored === 'dark' || stored === 'light' || stored === 'system' ? stored : 'system'
+  return stored === 'dark' || stored === 'light' || stored === 'system' ? stored : 'dark'
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [themePreference, setThemePreferenceState] = useState<ThemePreference>('system')
+  const [themePreference, setThemePreferenceState] = useState<ThemePreference>('dark')
   const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>('dark')
 
   useEffect(() => {

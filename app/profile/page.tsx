@@ -172,6 +172,10 @@ export default function ProfileDashboard() {
   const [showAccountMenu, setShowAccountMenu] = useState(false)
   const [avatarUrl, setAvatarUrl] = useState('')
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
+  const [userGender, setUserGender] = useState('male')
+  const [snapchatUrl, setSnapchatUrl] = useState('')
+  const [snapchatPreview, setSnapchatPreview] = useState('')
+  const [snapchatError, setSnapchatError] = useState('')
 
   const copy = isAr ? {
     savedItems: 'المحفوظات',
@@ -216,13 +220,14 @@ export default function ProfileDashboard() {
 
       const { data: profile } = await supabase
         .from('profiles')
-        .select('id, full_name, username, avatar_url')
+        .select('id, full_name, username, avatar_url, gender')
         .eq('id', user.id)
         .single()
 
       if (profile) {
         setUsername(profile.full_name || profile.username || user.email?.split('@')[0] || 'Style Icon')
         setAvatarUrl(profile.avatar_url || '')
+        setUserGender((profile.gender || 'male').toLowerCase())
       }
 
       const { count } = await supabase
@@ -291,6 +296,26 @@ export default function ProfileDashboard() {
     } catch {}
   }
 
+  const handleSnapchatImport = async () => {
+    setSnapchatError('')
+    const trimmed = snapchatUrl.trim().replace(/^@/, '')
+    if (!trimmed) return
+
+    // If it looks like a URL, use it directly
+    if (trimmed.startsWith('http')) {
+      setSnapchatPreview(trimmed)
+      await handleAvatarUrlPaste(trimmed)
+      setSnapchatUrl('')
+      return
+    }
+
+    // Otherwise treat as Snapchat username → fetch via unavatar.io
+    const avatarFetchUrl = `https://unavatar.io/snapchat/${encodeURIComponent(trimmed)}`
+    setSnapchatPreview(avatarFetchUrl)
+    await handleAvatarUrlPaste(avatarFetchUrl)
+    setSnapchatUrl('')
+  }
+
   if (loading) return <LoadingScreen />
 
   return (
@@ -317,9 +342,11 @@ export default function ProfileDashboard() {
               {avatarUrl ? (
                 <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
               ) : (
-                <span className="text-zinc-300 text-2xl font-light">
-                  {userEmail.charAt(0).toUpperCase()}
-                </span>
+                <img
+                  src={userGender === 'female' ? '/images/FF01.png' : '/images/MF01.png'}
+                  alt={userGender === 'female' ? 'Female Memoji' : 'Male Memoji'}
+                  className="w-full h-full object-cover"
+                />
               )}
             </div>
             <label className="absolute bottom-0 right-0 bg-white text-black p-2 rounded-full cursor-pointer shadow-lg active:scale-95 transition-transform hover:bg-zinc-100 flex items-center justify-center border border-zinc-200">
@@ -356,37 +383,88 @@ export default function ProfileDashboard() {
             </button>
           </div>
 
-          {/* Custom Avatar Settings Card */}
-          <div className="w-full bg-zinc-900/40 border border-zinc-800/80 rounded-2xl p-5 mb-8 text-left" dir={isAr ? 'rtl' : 'ltr'}>
-            <h3 className={`text-[10px] text-zinc-500 mb-2.5 font-bold ${isAr ? '' : 'uppercase tracking-widest'}`}>
-              {isAr ? 'مجسم العرض الافتراضي (Avatar)' : 'Virtual Try-On Avatar'}
-            </h3>
-            <p className="text-zinc-400 text-xs font-light leading-relaxed mb-4">
-              {isAr 
-                ? 'ارفع صورة رمزية (مثل Memoji بخلفية شفافة) لتجربة الملابس عليها افتراضياً. سيحصل المستخدمون الآخرون على مجسم العرض العادي.' 
-                : 'Upload or paste a stylized avatar (like a transparent iOS Memoji) to see outfits rendered on you. Leave blank for a standard mannequin.'}
-            </p>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                placeholder={isAr ? 'الصق رابط الصورة الرمزية...' : 'Paste avatar image URL...'}
-                value={avatarUrl}
-                onChange={(e) => handleAvatarUrlPaste(e.target.value)}
-                className="flex-1 bg-black/40 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-zinc-700 focus:outline-none focus:border-zinc-700 transition-colors"
+          {/* Virtual Try-On Avatar Card */}
+          <div className="w-full bg-zinc-900/40 border border-zinc-800/80 rounded-2xl overflow-hidden mb-8" dir={isAr ? 'rtl' : 'ltr'}>
+
+            {/* Large avatar display */}
+            <div className="relative w-full h-64 bg-zinc-900/60 overflow-hidden flex items-center justify-center">
+              <img
+                src={avatarUrl || (userGender === 'female' ? '/images/FF01.png' : '/images/MF01.png')}
+                alt="Avatar"
+                className="w-full h-full object-contain"
+                style={{ transform: 'scale(1.9)', transformOrigin: 'center center' }}
               />
-              {avatarUrl ? (
-                <button
-                  onClick={() => handleAvatarUrlPaste('')}
-                  className="bg-zinc-900 border border-zinc-800 hover:border-red-950 hover:text-red-400 transition-colors px-3 rounded-xl text-zinc-500 flex items-center justify-center"
-                  title="Clear Avatar"
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="18" y1="6" x2="6" y2="18"/>
-                    <line x1="6" y1="6" x2="18" y2="18"/>
-                  </svg>
-                </button>
-              ) : null}
+              {/* Label overlay */}
+              <div className="absolute bottom-0 inset-x-0 px-4 py-2.5 bg-gradient-to-t from-black/80 to-transparent flex items-end justify-between">
+                <p className="text-white text-xs font-medium">
+                  {avatarUrl ? (isAr ? 'أفاتارك' : 'Your avatar') : (isAr ? 'ميموجي افتراضي' : 'Default Memoji')}
+                </p>
+                {avatarUrl && (
+                  <button
+                    onClick={() => { handleAvatarUrlPaste(''); setSnapchatPreview('') }}
+                    className="text-zinc-400 hover:text-red-400 transition-colors flex items-center gap-1 text-[10px]"
+                  >
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                      <path d="M18 6L6 18M6 6l12 12"/>
+                    </svg>
+                    {isAr ? 'إزالة' : 'Remove'}
+                  </button>
+                )}
+              </div>
+              {/* Header label */}
+              <div className="absolute top-3 left-4">
+                <p className={`text-[9px] text-zinc-500 font-bold ${isAr ? '' : 'uppercase tracking-widest'}`}>
+                  {isAr ? 'مجسم العرض الافتراضي' : 'Virtual Try-On Avatar'}
+                </p>
+              </div>
             </div>
+
+            {/* Snapchat import */}
+            <div className="p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <div className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0" style={{ background: '#FFFC00' }}>
+                  <svg width="11" height="11" viewBox="0 0 128 128" fill="black">
+                    <path d="M64 8C38.4 8 18 28.4 18 54c0 14.2 5.8 26.2 14.4 35.2-1.2 2.8-3.4 5.4-7.2 7-1.4.6-2.2 2-1.8 3.4.4 1.4 1.8 2.4 3.2 2.2 4.2-.4 7.8-1.6 10.8-3.2 4.2 2.4 9 3.8 14.2 4.2.4 4.6 3.8 8.2 8.4 8.2s8-3.6 8.4-8.2c5.2-.4 10-1.8 14.2-4.2 3 1.6 6.6 2.8 10.8 3.2 1.4.2 2.8-.8 3.2-2.2.4-1.4-.4-2.8-1.8-3.4-3.8-1.6-6-4.2-7.2-7C103 80.2 110 68.2 110 54 110 28.4 89.6 8 64 8z"/>
+                  </svg>
+                </div>
+                <p className={`text-[10px] text-zinc-500 font-bold ${isAr ? '' : 'uppercase tracking-widest'}`}>
+                  {isAr ? 'استيراد من Snapchat' : 'Import from Snapchat'}
+                </p>
+              </div>
+
+              <div className="flex gap-2">
+                <div className="flex-1 relative">
+                  <span className={`absolute top-1/2 -translate-y-1/2 text-zinc-600 text-xs pointer-events-none select-none ${isAr ? 'right-3.5' : 'left-3.5'}`}>@</span>
+                  <input
+                    type="text"
+                    placeholder={isAr ? 'اسم مستخدم Snapchat...' : 'Snapchat username...'}
+                    value={snapchatUrl}
+                    onChange={(e) => { setSnapchatUrl(e.target.value); setSnapchatError('') }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') void handleSnapchatImport() }}
+                    className={`w-full bg-black/40 border border-zinc-800 rounded-xl py-2.5 text-xs text-white placeholder-zinc-700 focus:outline-none focus:border-yellow-500/40 transition-colors ${isAr ? 'pr-7 pl-3.5' : 'pl-7 pr-3.5'}`}
+                  />
+                </div>
+                <button
+                  onClick={() => void handleSnapchatImport()}
+                  disabled={!snapchatUrl.trim()}
+                  className="px-4 rounded-xl text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-95 flex-shrink-0"
+                  style={{ background: '#FFFC00', color: 'black' }}
+                >
+                  {isAr ? 'استيراد' : 'Import'}
+                </button>
+              </div>
+
+              {snapchatError && (
+                <p className="text-red-400 text-[11px]">{snapchatError}</p>
+              )}
+
+              {snapchatPreview && !snapchatError && (
+                <p className="text-zinc-500 text-[11px]">
+                  {isAr ? 'تم الاستيراد وسيُستخدم لعرض الإطلالات عليك.' : 'Imported! Your Snapchat avatar will be used to dress outfits on you.'}
+                </p>
+              )}
+            </div>
+
           </div>
 
           {/* Actions */}

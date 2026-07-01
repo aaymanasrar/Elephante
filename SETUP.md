@@ -54,7 +54,7 @@ In Supabase Dashboard:
    - Click **Generate Outfits**
 
 The AI will create 3 personalized outfits with:
-- Real product links from ASOS, H&M, and Uniqlo
+- Real product links from authentic brand websites (H&M, Uniqlo, Zara, etc.)
 - Generated outfit visualization images
 - Styling tips tailored to your body type and skin tone
 

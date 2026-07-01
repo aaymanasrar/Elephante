@@ -6,9 +6,36 @@ import { supabase } from '@/lib/supabase'
 import { requestOutfitGeneration, requestOutfitSearch, type WeatherContext } from '@/services/feedSearchApi'
 import { insertGeneratedOutfitBatch } from '@/services/outfitService'
 import type { GeneratedOutfitResult } from '@/types/outfit'
+import { extractCityFromQuery } from '@/lib/regionalBrands'
+
+async function fetchWeatherForCity(city: string): Promise<WeatherContext | null> {
+  try {
+    const res = await fetch('/api/weather', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ city }),
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    if (!data.city || data.temperature_c == null) return null
+    return { city: data.city, temperature_c: data.temperature_c, condition: data.condition }
+  } catch {
+    return null
+  }
+}
 
 type BannerColor = { hex: string; name: string }
-type ChatTurn = { role: 'user' | 'assistant'; content: string }
+type ChatTurn = {
+  role: 'user' | 'assistant'
+  content: string
+  display?: 'analysis-card'
+  imagePreview?: string
+  analysis?: any
+  outfitCards?: OutfitCard[]
+  generatedOutfit?: GeneratedOutfit
+  colors?: BannerColor[]
+  mode?: string
+}
 type GeneratedOutfit = GeneratedOutfitResult | null
 
 export type OutfitCardPieces = {
@@ -27,6 +54,7 @@ export type OutfitCard = {
   color_scheme: string
   key_colors: string[]
   pieces: OutfitCardPieces
+  brands?: Partial<Record<keyof OutfitCardPieces, string | null>>
   why_it_works: string
   styling_tip: string
   cultural_note?: string | null
@@ -168,6 +196,11 @@ export function useAiSearchFlow({
       setAiStatus(statusCopy.curating)
 
       try {
+        // If the query names a city, fetch its weather and use it instead of GPS weather
+        const queryCityName = extractCityFromQuery(query)
+        const weatherOverride = queryCityName ? await fetchWeatherForCity(queryCityName) : null
+        const effectiveWeather = weatherOverride ?? weather
+
         const data = await requestOutfitSearch({
           chatHistory: chatHistoryRef.current,
           displayName,
@@ -178,7 +211,7 @@ export function useAiSearchFlow({
           userSkinTone,
           userStylePref,
           language,
-          weather,
+          weather: effectiveWeather,
         }, controller.signal)
 
         if (!isActiveQuery()) return
@@ -198,7 +231,7 @@ export function useAiSearchFlow({
             setChatHistory((prev) => [
               ...prev,
               { role: 'user', content: query },
-              { role: 'assistant', content: data.response },
+              { role: 'assistant', content: data.response, outfitCards: data.cards, mode: 'cards' },
             ])
             setFinalBanner({ text: data.response, vibe: data.vibe || '' })
           }
@@ -222,7 +255,7 @@ export function useAiSearchFlow({
             setChatHistory((prev) => [
               ...prev,
               { role: 'user', content: query },
-              { role: 'assistant', content: data.response },
+              { role: 'assistant', content: data.response, colors: data.colors, mode: 'advice' },
             ])
             setFinalBanner({ text: data.response, vibe: '', colors: data.colors || [] })
           }
@@ -245,7 +278,7 @@ export function useAiSearchFlow({
           setChatHistory((prev) => [
             ...prev,
             { role: 'user', content: query },
-            { role: 'assistant', content: context.response },
+            { role: 'assistant', content: context.response, colors: context.colors, mode: context.mode },
           ])
           setFinalBanner({ text: context.response, vibe: context.vibe || '', colors: context.colors })
         }
@@ -293,6 +326,22 @@ export function useAiSearchFlow({
           : (generation.outfit.skin_tone_analysis || generation.outfit.pro_tip || '')
         if (!isActiveQuery()) return
         setFinalBanner({ text: bannerText || statusCopy.fallbackBanner, vibe: generation.outfit.style || '' })
+        setChatHistory((prev) => {
+          const next = [...prev]
+          for (let i = next.length - 1; i >= 0; i--) {
+            const turn = next[i]
+            if (turn && turn.role === 'assistant') {
+              next[i] = {
+                ...turn,
+                role: 'assistant',
+                generatedOutfit: generation,
+                content: turn.content || bannerText || statusCopy.fallbackBanner,
+              }
+              break
+            }
+          }
+          return next
+        })
 
         const { data: { user } } = await supabase.auth.getUser()
         if (!user || !isActiveQuery()) return
@@ -316,6 +365,25 @@ export function useAiSearchFlow({
             image_url: inserted[0]?.image_url || previous.image_url,
             alternative_image_url: inserted[1]?.image_url || previous.alternative_image_url,
           } : previous)
+          setChatHistory((prev) => {
+            const next = [...prev]
+            for (let i = next.length - 1; i >= 0; i--) {
+              const turn = next[i]
+              if (turn && turn.role === 'assistant' && turn.generatedOutfit) {
+                next[i] = {
+                  ...turn,
+                  role: 'assistant',
+                  generatedOutfit: {
+                    ...turn.generatedOutfit,
+                    image_url: inserted[0]?.image_url || turn.generatedOutfit.image_url,
+                    alternative_image_url: inserted[1]?.image_url || turn.generatedOutfit.alternative_image_url,
+                  }
+                }
+                break
+              }
+            }
+            return next
+          })
         }
       } catch (error: any) {
         if (isActiveQuery()) {

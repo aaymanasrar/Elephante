@@ -7,6 +7,8 @@ import { supabase } from '@/lib/supabase'
 import LoadingScreen from '@/app/components/LoadingScreen'
 import ParticleCanvas from '@/components/ParticleCanvas'
 import { detectPieceBrand, getAesthetic } from '@/lib/brands'
+import { getBrandShopLink, getCategoryBrandLink } from '@/lib/affiliates'
+import type { Gender } from '@/lib/affiliates'
 import { useRequireUser } from '@/hooks/useRequireUser'
 import { canUseNextImage } from '@/lib/image'
 import { getFriendlyDataError } from '@/lib/supabaseErrors'
@@ -59,8 +61,11 @@ const outfitCopy = {
     spinUnavailable: 'Add outfit pieces before generating a 360 spin.',
     spinError: 'Could not build the 360 garment spin.',
     logWear: 'Log Wear',
+    wearHistory: 'Wear History',
     wornTimes: (n: number) => n === 1 ? 'Worn 1 time' : `Worn ${n} times`,
     lastWorn: 'Last worn',
+    neverWorn: 'Not worn yet',
+    logWearError: 'Could not update wear history.',
   },
   ar: {
     archive: 'الأرشيف',
@@ -95,8 +100,11 @@ const outfitCopy = {
     spinUnavailable: 'أضف تفاصيل القطع قبل إنشاء عرض 360.',
     spinError: 'تعذّر بناء عرض 360 للملابس.',
     logWear: 'سجّل ارتداء',
+    wearHistory: 'تاريخ الارتداء',
     wornTimes: (n: number) => `ارتديت ${n} مرة`,
     lastWorn: 'آخر ارتداء',
+    neverWorn: 'لم تُرتدَ بعد',
+    logWearError: 'تعذّر تحديث تاريخ الارتداء.',
   },
 } as const
 
@@ -317,6 +325,357 @@ function normalizeAnalysisForDisplay(input: AnalysisState): AnalysisState {
   }
 }
 
+// ─── NearbyStoreButton ───────────────────────────────────────────────────────
+function NearbyStoreButton({ brand, isAr }: { brand: string; isAr: boolean }) {
+  const [loading, setLoading] = useState(false)
+
+  const handleClick = async () => {
+    setLoading(true)
+    try {
+      const coords = await new Promise<{ lat: number; lon: number }>((resolve, reject) => {
+        if (!navigator.geolocation) { reject(new Error('no geo')); return }
+        navigator.geolocation.getCurrentPosition(
+          pos => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+          reject,
+          { timeout: 6000, maximumAge: 300_000 }
+        )
+      })
+      const res = await fetch(`/api/nearby-shops?lat=${coords.lat}&lon=${coords.lon}&radius=5000&brands=${encodeURIComponent(brand)}`)
+      const data = await res.json()
+      const shops: Array<{ mapsUrl: string; brandMatch?: string }> = data.shops || []
+      const target = shops.find(s => s.brandMatch) || shops[0]
+      if (target) {
+        window.open(target.mapsUrl, '_blank', 'noopener,noreferrer')
+      } else {
+        window.open(`https://www.google.com/maps/search/${encodeURIComponent(brand + ' store')}/@${coords.lat},${coords.lon},14z`, '_blank', 'noopener,noreferrer')
+      }
+    } catch {
+      window.open(`https://www.google.com/maps/search/${encodeURIComponent(brand + ' store near me')}`, '_blank', 'noopener,noreferrer')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <button
+      onClick={() => void handleClick()}
+      disabled={loading}
+      title={isAr ? `أقرب متجر ${brand}` : `Nearest ${brand} store`}
+      className="shrink-0 flex items-center gap-1 px-2.5 py-1 border border-zinc-800 rounded-full text-[9px] uppercase tracking-widest text-zinc-600 hover:border-amber-600/50 hover:text-amber-500 transition-all duration-200 active:scale-95 disabled:opacity-40"
+    >
+      {loading ? (
+        <div className="w-2.5 h-2.5 border border-current/40 border-t-current rounded-full animate-spin" />
+      ) : (
+        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+          <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/>
+        </svg>
+      )}
+      {loading ? '...' : (isAr ? 'متجر' : 'Store')}
+    </button>
+  )
+}
+
+// ─── PriceHistoryGraph ────────────────────────────────────────────────────────
+function PriceHistoryGraph({ history, currency }: {
+  history: Array<{ price: number; checked_at: string }>
+  currency: string
+}) {
+  if (history.length === 0) return (
+    <p className="text-[10px] text-zinc-700 italic">Tracking started — price history will appear here after first check.</p>
+  )
+
+  const prices = history.map(h => h.price)
+  const min = Math.min(...prices)
+  const max = Math.max(...prices)
+  const range = max - min || 1
+  const W = 260, H = 56, PAD = 4
+
+  const pts = history.map((h, i) => {
+    const x = PAD + (i / Math.max(history.length - 1, 1)) * (W - PAD * 2)
+    const y = H - PAD - ((h.price - min) / range) * (H - PAD * 2)
+    return { x, y, price: h.price, date: new Date(h.checked_at).toLocaleDateString() }
+  })
+
+  const pathD = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ')
+  const latest = pts[pts.length - 1]
+  const oldest = pts[0]
+  const dropped = latest && oldest && latest.price < oldest.price
+  const color = dropped ? '#22c55e' : '#52525b'
+
+  return (
+    <div className="mt-2">
+      <svg width={W} height={H} className="overflow-visible w-full">
+        <path d={pathD} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        {pts.map((p, i) => (
+          <circle key={i} cx={p.x} cy={p.y} r="2.5" fill={i === pts.length - 1 ? color : '#27272a'} stroke={color} strokeWidth="1" />
+        ))}
+        {latest && (
+          <text x={latest.x} y={latest.y - 6} fill={color} fontSize="8" textAnchor="middle" fontFamily="monospace">
+            {currency}{latest.price.toFixed(0)}
+          </text>
+        )}
+      </svg>
+      <div className="flex justify-between mt-1">
+        <span className="text-[8px] text-zinc-700">{pts[0]?.date}</span>
+        {pts.length > 1 && <span className="text-[8px] text-zinc-700">{pts[pts.length - 1]?.date}</span>}
+      </div>
+    </div>
+  )
+}
+
+// ─── OutfitPriceTracker ───────────────────────────────────────────────────────
+interface WatchEntry {
+  id: string
+  product_url: string
+  product_name: string
+  brand: string | null
+  current_price: number | null
+  currency: string
+  created_at: string
+  price_history: Array<{ price: number; checked_at: string }>
+}
+
+function OutfitPriceTracker({ trackablePieces, userId, isAr }: {
+  trackablePieces: Array<{ name: string; url: string; brand: string | null }>
+  userId: string | undefined
+  isAr: boolean
+}) {
+  const [watches, setWatches] = useState<WatchEntry[]>([])
+  const [tracking, setTracking] = useState<Set<string>>(new Set())
+  const [removing, setRemoving] = useState<Set<string>>(new Set())
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    if (!userId) return
+    fetch('/api/price-watch')
+      .then(r => r.json())
+      .then(data => { if (data.watches) setWatches(data.watches) })
+      .catch(() => {})
+      .finally(() => setLoaded(true))
+  }, [userId])
+
+  const isTracked = (url: string) => watches.some(w => w.product_url === url)
+
+  const handleTrack = async (piece: { name: string; url: string; brand: string | null }) => {
+    if (!userId || tracking.has(piece.url)) return
+    setTracking(prev => new Set([...prev, piece.url]))
+    try {
+      const res = await fetch('/api/price-watch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ product_url: piece.url, product_name: piece.name, brand: piece.brand }),
+      })
+      const data = await res.json()
+      if (data.watch) setWatches(prev => [{ ...data.watch, price_history: [] }, ...prev.filter(w => w.product_url !== piece.url)])
+    } catch {}
+    finally { setTracking(prev => { const s = new Set(prev); s.delete(piece.url); return s }) }
+  }
+
+  const handleRemove = async (watch: WatchEntry) => {
+    if (removing.has(watch.id)) return
+    setRemoving(prev => new Set([...prev, watch.id]))
+    try {
+      await fetch(`/api/price-watch?id=${watch.id}`, { method: 'DELETE' })
+      setWatches(prev => prev.filter(w => w.id !== watch.id))
+    } catch {}
+    finally { setRemoving(prev => { const s = new Set(prev); s.delete(watch.id); return s }) }
+  }
+
+  if (!userId) return null
+
+  const label = (k: string) => isAr ? k : k
+  const trackedWatches = watches.filter(w => trackablePieces.some(p => p.url === w.product_url))
+
+  return (
+    <div className="mb-8" style={{ animation: 'fadeUp 0.5s cubic-bezier(0.4,0,0.2,1) both', animationDelay: '0.6s' }}>
+      <p className={`text-[9px] text-zinc-600 mb-4 flex items-center gap-3 ${isAr ? 'font-medium' : 'uppercase tracking-[0.3em]'}`}>
+        {isAr ? 'تتبع الأسعار' : 'Track Prices'}
+        <span className="flex-1 h-px bg-zinc-900" />
+      </p>
+
+      {/* Untracked pieces */}
+      <div className="space-y-2 mb-4">
+        {trackablePieces.filter(p => !isTracked(p.url)).map(piece => (
+          <div key={piece.url} className="flex items-center gap-3 py-2.5 px-3 rounded-xl border border-zinc-800/50 bg-zinc-950/40">
+            <div className="flex-1 min-w-0">
+              <p className="text-[11px] text-zinc-400 truncate">{piece.name}</p>
+              {piece.brand && <p className="text-[8px] text-zinc-700 uppercase tracking-wider mt-0.5">{piece.brand}</p>}
+            </div>
+            <button
+              onClick={() => void handleTrack(piece)}
+              disabled={tracking.has(piece.url)}
+              className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-zinc-700 text-zinc-400 text-[9px] uppercase tracking-[0.2em] hover:border-white hover:text-white transition-all active:scale-95 disabled:opacity-40"
+            >
+              {tracking.has(piece.url) ? (
+                <div className="w-2.5 h-2.5 border border-current/40 border-t-current rounded-full animate-spin" />
+              ) : (
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              )}
+              {isAr ? 'تتبع' : 'Track'}
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {/* Tracked pieces with price graph */}
+      {trackedWatches.map(watch => (
+        <div key={watch.id} className="mb-4 p-3 rounded-xl border border-zinc-800/60 bg-zinc-950/40">
+          <div className="flex items-start justify-between gap-2 mb-2">
+            <div className="flex-1 min-w-0">
+              <p className="text-[11px] text-zinc-300 truncate">{watch.product_name}</p>
+              <div className="flex items-center gap-2 mt-0.5">
+                {watch.brand && <span className="text-[8px] text-zinc-600 uppercase tracking-wider">{watch.brand}</span>}
+                {watch.current_price != null && (
+                  <span className="text-[9px] text-zinc-400 font-mono">{watch.currency}{watch.current_price.toFixed(2)}</span>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <a href={watch.product_url} target="_blank" rel="noopener noreferrer" className="text-[8px] text-zinc-600 hover:text-zinc-400 uppercase tracking-wider transition-colors">
+                ↗
+              </a>
+              <button
+                onClick={() => void handleRemove(watch)}
+                disabled={removing.has(watch.id)}
+                className="text-zinc-700 hover:text-red-500 transition-colors text-[10px]"
+                title={isAr ? 'إيقاف التتبع' : 'Stop tracking'}
+              >
+                ×
+              </button>
+            </div>
+          </div>
+          <PriceHistoryGraph
+            history={(watch.price_history || []).slice().sort((a, b) => new Date(a.checked_at).getTime() - new Date(b.checked_at).getTime())}
+            currency={watch.currency}
+          />
+          <p className="text-[8px] text-zinc-700 mt-2">
+            {isAr ? 'منذ' : 'Tracking since'} {new Date(watch.created_at).toLocaleDateString()}
+          </p>
+        </div>
+      ))}
+
+      {loaded && trackablePieces.length === 0 && (
+        <p className="text-[11px] text-zinc-700">{isAr ? 'لا توجد قطع لتتبع أسعارها.' : 'No pieces with shop links to track yet.'}</p>
+      )}
+    </div>
+  )
+}
+
+interface NearbyShopItem {
+  id: number
+  name: string
+  type: 'clothing' | 'tailor' | 'department' | 'shoes' | 'general' | 'brand_store'
+  distanceM: number
+  lat: number
+  lon: number
+  mapsUrl: string
+  address?: string
+  brandMatch?: string
+}
+
+function NearbyShopsSection({ brands, isAr }: { brands: string[]; isAr: boolean }) {
+  const [shops, setShops] = useState<NearbyShopItem[]>([])
+  const [loading, setLoading] = useState(false)
+  const [done, setDone] = useState(false)
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !navigator.geolocation) { setDone(true); return }
+    setLoading(true)
+    navigator.geolocation.getCurrentPosition(
+      async ({ coords }) => {
+        const { latitude: lat, longitude: lon } = coords
+        const brandsParam = brands.length ? `&brands=${encodeURIComponent(brands.join(','))}` : ''
+        try {
+          const res = await fetch(`/api/nearby-shops?lat=${lat}&lon=${lon}&radius=5000${brandsParam}`)
+          const data = await res.json()
+          if (Array.isArray(data.shops)) setShops(data.shops)
+        } catch {}
+        setLoading(false)
+        setDone(true)
+      },
+      () => { setLoading(false); setDone(true) },
+      { timeout: 8000, maximumAge: 300_000 }
+    )
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  if (!loading && !done) return null
+  if (done && shops.length === 0) return null
+
+  const shopIcon = (type: NearbyShopItem['type']) => {
+    if (type === 'tailor') return (
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+        <circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/>
+        <path d="M8.12 8.12L12 12M12 12l3.88 3.88"/>
+      </svg>
+    )
+    if (type === 'brand_store') return (
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+        <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
+        <polyline points="9 22 9 12 15 12 15 22"/>
+      </svg>
+    )
+    return (
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+        <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 01-8 0"/>
+      </svg>
+    )
+  }
+
+  const shopColor = (type: NearbyShopItem['type']) => {
+    if (type === 'tailor') return 'bg-amber-950/60 text-amber-500'
+    if (type === 'brand_store') return 'bg-zinc-800 text-zinc-300'
+    return 'bg-zinc-800/60 text-zinc-500'
+  }
+
+  const fmtDist = (m: number) => m < 1000 ? `${m} m` : `${(m / 1000).toFixed(1)} km`
+
+  return (
+    <div className="mb-8" style={{ animation: 'fadeUp 0.5s cubic-bezier(0.4,0,0.2,1) both', animationDelay: '0.55s' }}>
+      <p className={`text-[9px] text-zinc-600 mb-4 flex items-center gap-3 ${isAr ? 'font-medium' : 'uppercase tracking-[0.3em]'}`}>
+        {isAr ? 'أين تشتري قريبًا' : 'Where to Buy Nearby'}
+        <span className="flex-1 h-px bg-zinc-900" />
+      </p>
+      {loading ? (
+        <div className="flex items-center gap-2 py-1">
+          <div className="w-3 h-3 border border-zinc-800 border-t-zinc-600 rounded-full animate-spin" />
+          <span className="text-[11px] text-zinc-600">{isAr ? 'جارٍ البحث...' : 'Finding nearby shops...'}</span>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {shops.map(shop => (
+            <a
+              key={shop.id}
+              href={shop.mapsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-3 py-2.5 px-3 rounded-xl border border-zinc-800/60 hover:border-zinc-600 hover:bg-zinc-900/40 transition-all group"
+            >
+              <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${shopColor(shop.type)}`}>
+                {shopIcon(shop.type)}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[12px] text-zinc-200 truncate group-hover:text-white">{shop.name}</p>
+                {shop.brandMatch ? (
+                  <p className="text-[8px] uppercase tracking-[0.2em] text-zinc-500 mt-0.5">{shop.brandMatch}</p>
+                ) : shop.address ? (
+                  <p className="text-[9px] text-zinc-600 mt-0.5">{shop.address}</p>
+                ) : null}
+              </div>
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                <span className="text-[9px] text-zinc-600">{fmtDist(shop.distanceM)}</span>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-zinc-700 group-hover:text-zinc-400 transition-colors">
+                  <path d="M7 17L17 7M7 7h10v10" />
+                </svg>
+              </div>
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function OutfitHeroImage({ outfit, title }: { outfit: Outfit; title: string }) {
   if (!outfit.image_url) return null
 
@@ -358,7 +717,8 @@ export default function OutfitDetail() {
   const [generatingImage, setGeneratingImage] = useState(false)
   const [arabicTranslations, setArabicTranslations] = useState<Record<string, string>>({})
   const closetSection = searchParams.get('closetSection')
-  const closetBackHref = closetSection === 'personal' || closetSection === 'stylist' || closetSection === 'curated'
+  const fromFeed = searchParams.get('from') === 'feed'
+  const closetBackHref = !fromFeed && (closetSection === 'personal' || closetSection === 'stylist' || closetSection === 'curated')
     ? `/closet?section=${closetSection}`
     : null
 
@@ -661,7 +1021,9 @@ export default function OutfitDetail() {
   const whenTo = tr(rawWhenTo) || null
   const outfitCode = outfit.outfit_code || null
   const outfitAesthetic = getAesthetic(rawColorScheme || null, outfit.aesthetic || null)
-  const brand = outfit.brand || null
+  const rawBrand = outfit.brand || null
+  // Don't treat a JSON brands object as a plain brand name
+  const brand = rawBrand && !rawBrand.startsWith('{') ? rawBrand : null
   const rawOccasions = isExcel ? outfit.occasions : outfit.occasion
   const occasionList = rawOccasions
     ? rawOccasions.split(/[|;,]/).map((value) => value.trim()).filter(Boolean)
@@ -682,20 +1044,32 @@ export default function OutfitDetail() {
   }
 
   const worksFor = deriveWorksFor(outfit, rawColorScheme, hexColors)
-  const pieces: Array<{ label: string; value: string }> = []
+  // Parse per-piece brands from JSON stored in outfit.brand (e.g. {"top":"Uniqlo","bottom":"Zara"})
+  let perPieceBrands: Record<string, string | null> | null = null
+  if (outfit.brand?.startsWith('{')) {
+    try { perPieceBrands = JSON.parse(outfit.brand) as Record<string, string | null> } catch {}
+  }
+
+  const PIECE_KEY_MAP: Record<string, string> = {
+    Top: 'top', Bottom: 'bottom', Shoes: 'shoes',
+    Accessories: 'accessories', Outerwear: 'outerwear', Shoe: 'shoes',
+  }
+
+  const pieces: Array<{ label: string; value: string; pieceKey?: string }> = []
   if (isExcel) {
-    if (outfit.top_wear) pieces.push({ label: 'Top', value: outfit.top_wear })
-    if (outfit.bottom_wear) pieces.push({ label: 'Bottom', value: outfit.bottom_wear })
-    if (outfit.shoes) pieces.push({ label: 'Shoes', value: outfit.shoes })
-    if (outfit.accessories) pieces.push({ label: 'Accessories', value: outfit.accessories })
-    if (outfit.outerwear) pieces.push({ label: 'Outerwear', value: outfit.outerwear })
+    if (outfit.top_wear) pieces.push({ label: 'Top', value: outfit.top_wear, pieceKey: 'top' })
+    if (outfit.bottom_wear) pieces.push({ label: 'Bottom', value: outfit.bottom_wear, pieceKey: 'bottom' })
+    if (outfit.shoes) pieces.push({ label: 'Shoes', value: outfit.shoes, pieceKey: 'shoes' })
+    if (outfit.accessories) pieces.push({ label: 'Accessories', value: outfit.accessories, pieceKey: 'accessories' })
+    if (outfit.outerwear) pieces.push({ label: 'Outerwear', value: outfit.outerwear, pieceKey: 'outerwear' })
   } else if (Array.isArray(outfit.pieces) && outfit.pieces.length) {
     outfit.pieces.forEach((piece, index) => {
       const labels = ['Top', 'Bottom', 'Shoes', 'Accessories', 'Outerwear', 'Extra']
-      pieces.push({ label: labels[index] || `Piece ${index + 1}`, value: piece })
+      const label = labels[index] || `Piece ${index + 1}`
+      pieces.push({ label, value: piece, pieceKey: PIECE_KEY_MAP[label] })
     })
   } else if (outfit.top) {
-    pieces.push({ label: 'Top', value: outfit.top })
+    pieces.push({ label: 'Top', value: outfit.top, pieceKey: 'top' })
   }
 
   const materials: Array<{ label: string; value: string }> = []
@@ -819,25 +1193,42 @@ export default function OutfitDetail() {
             <SectionLabel isAr={isAr}>{t.pieces}</SectionLabel>
             <div className="divide-y divide-zinc-900/80">
               {pieces.map((piece) => {
-                const brandInfo = detectPieceBrand(piece.value, brand)
+                const specificBrand = piece.pieceKey ? (perPieceBrands?.[piece.pieceKey] ?? null) : null
+                const brandInfo = detectPieceBrand(piece.value, brand, specificBrand)
+                const outfitGender: Gender = outfit.gender === 'female' ? 'female' : 'male'
+                const fallback = getCategoryBrandLink(piece.value, outfitGender)
                 return (
                   <div
                     key={`${piece.label}-${piece.value}`}
-                    className={`flex items-center gap-3 py-3.5 ${isAr ? 'flex-row-reverse' : ''}`}
+                    className={`flex items-start gap-3 py-3.5 ${isAr ? 'flex-row-reverse' : ''}`}
                   >
-                    <span className={`text-[9px] text-zinc-700 w-20 shrink-0 ${isAr ? 'text-left' : 'uppercase tracking-[0.25em]'}`}>{localLabel(piece.label, isAr)}</span>
+                    <span className={`text-[9px] text-zinc-700 w-20 shrink-0 pt-0.5 ${isAr ? 'text-left' : 'uppercase tracking-[0.25em]'}`}>{localLabel(piece.label, isAr)}</span>
                     <span className={`text-[13px] text-zinc-300 leading-snug flex-1 ${isAr ? 'text-right' : ''}`}>{tr(piece.value)}</span>
                     {brandInfo ? (
+                      <div className="flex flex-col gap-1.5 shrink-0" dir="ltr">
+                        <a
+                          href={brandInfo.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 px-2.5 py-1 border border-zinc-800 rounded-full text-[9px] uppercase tracking-widest text-zinc-500 hover:border-zinc-500 hover:text-white transition-all duration-200 active:scale-95 whitespace-nowrap"
+                        >
+                          {brandInfo.brand}
+                          <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M7 17L17 7M7 7h10v10"/></svg>
+                        </a>
+                        <NearbyStoreButton brand={brandInfo.brand} isAr={isAr} />
+                      </div>
+                    ) : (
                       <a
-                        href={brandInfo.url}
+                        href={fallback.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="shrink-0 px-3 py-1 border border-zinc-800 rounded-full text-[9px] uppercase tracking-widest text-zinc-500 hover:border-zinc-500 hover:text-white transition-all duration-200 active:scale-95 whitespace-nowrap"
+                        className="flex items-center gap-1 shrink-0 px-2.5 py-1 border border-zinc-800 rounded-full text-[9px] uppercase tracking-widest text-zinc-500 hover:border-zinc-500 hover:text-white transition-all duration-200 active:scale-95 whitespace-nowrap"
                         dir="ltr"
                       >
-                        {brandInfo.brand}
+                        {fallback.label}
+                        <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M7 17L17 7M7 7h10v10"/></svg>
                       </a>
-                    ) : null}
+                    )}
                   </div>
                 )
               })}
@@ -861,61 +1252,58 @@ export default function OutfitDetail() {
           </div>
         ) : null}
 
-        {outfit.image_url ? (
-          <div className="mb-2" style={fadeUp(0.5)}>
-            <div className="h-px bg-zinc-900 mb-6" />
-            <button
-              onClick={handleAnalyse}
-              disabled={analysing}
-              className={`cursor-pointer w-full h-12 rounded-2xl border border-zinc-800 text-zinc-500 text-[10px] font-bold hover:border-zinc-600 hover:text-white transition-all duration-300 active:scale-[0.97] disabled:opacity-40 flex items-center justify-center gap-2.5 ${isAr ? '' : 'uppercase tracking-[0.3em]'}`}
-            >
-              {analysing ? (
-                <>
-                  <span className="w-3.5 h-3.5 border-2 border-zinc-700 border-t-zinc-300 rounded-full animate-spin" />
-                  {t.analysing}
-                </>
-              ) : (
-                <>
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 2L14.4 9.6L22 12L14.4 14.4L12 22L9.6 14.4L2 12L9.6 9.6L12 2Z" />
-                  </svg>
-                  {dataSaved ? t.reanalyse : analysis ? t.reanalyse : t.analyse}
-                  {dataSaved ? <span className={`text-[9px] text-emerald-500/80 ${isAr ? '' : 'uppercase tracking-widest'}`}>· {t.saved}</span> : null}
-                </>
-              )}
-            </button>
-            {analysisError ? <p className="text-red-400 text-[11px] text-center mt-3">{analysisError}</p> : null}
+        {(() => {
+          const rawDetails = outfit.outfit_details || ''
+          const proTipMatch = rawDetails.match(/^([\s\S]*?)\s*pro\s+tip[:\s]+/i)
+          const detailsText = proTipMatch ? (proTipMatch[1] ?? '').trim() : rawDetails.trim()
+          const inlineTip = proTipMatch
+            ? rawDetails.slice(proTipMatch[0].length).trim()
+            : null
+          const proTipText = outfit.pro_tip || inlineTip
 
-            {analysis ? (
-              <div className="mt-6 space-y-5 animate-in fade-in slide-in-from-bottom-2 duration-400">
-                {analysis.key_colors?.length ? (
-                  <div className="flex gap-2.5">
-                    {analysis.key_colors.map((hex) => (
-                      <div key={hex} className="w-9 h-9 rounded-xl border border-white/10 shadow-sm" style={{ backgroundColor: hex }} />
-                    ))}
-                  </div>
-                ) : null}
-                <div>
-                  <p className="text-white text-base font-light">{tr(analysis.outfit_name)}</p>
-                  <p className="text-zinc-500 text-[11px] mt-0.5 tracking-wide">{tr(analysis.vibe)} · {tr(analysis.style)}</p>
+          if (!detailsText && !proTipText) return null
+          return (
+            <div className="mb-8 space-y-5" style={fadeUp(0.5)}>
+              <div className="h-px bg-zinc-900" />
+              {detailsText ? (
+                <div className="pl-3 border-l-2 border-zinc-800">
+                  <p className={`text-[9px] text-zinc-700 mb-1.5 ${isAr ? '' : 'uppercase tracking-[0.2em]'}`}>{t.detailsNotes}</p>
+                  <p className="text-[13px] text-zinc-400 leading-relaxed">{tr(detailsText)}</p>
                 </div>
-                {analysis.color_scheme ? <p className="text-zinc-600 text-[12px] italic">{tr(analysis.color_scheme)}</p> : null}
-                {analysis.why_it_works ? (
-                  <div className="pl-3 border-l-2 border-zinc-800">
-                    <p className={`text-[9px] text-zinc-700 mb-1.5 ${isAr ? '' : 'uppercase tracking-[0.2em]'}`}>{t.detailsNotes}</p>
-                    <p className="text-[13px] text-zinc-400 leading-relaxed">{tr(analysis.why_it_works)}</p>
-                  </div>
-                ) : null}
-                {analysis.styling_tip ? (
-                  <div className="pl-3 border-l-2 border-zinc-800">
-                    <p className={`text-[9px] text-zinc-700 mb-1.5 ${isAr ? '' : 'uppercase tracking-[0.2em]'}`}>{t.proTip}</p>
-                    <p className="text-[13px] text-zinc-400 leading-relaxed">{tr(analysis.styling_tip)}</p>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
+              ) : null}
+              {proTipText ? (
+                <div className="pl-3 border-l-2 border-zinc-800">
+                  <p className={`text-[9px] text-zinc-700 mb-1.5 ${isAr ? '' : 'uppercase tracking-[0.2em]'}`}>{t.proTip}</p>
+                  <p className="text-[13px] text-zinc-400 leading-relaxed">{tr(proTipText)}</p>
+                </div>
+              ) : null}
+            </div>
+          )
+        })()}
+
+        {(() => {
+          const allBrands = perPieceBrands
+            ? Object.values(perPieceBrands).filter((b): b is string => typeof b === 'string' && b.trim().length > 0)
+            : brand ? [brand] : []
+          const uniqueBrands = [...new Set(allBrands)]
+          return <NearbyShopsSection brands={uniqueBrands} isAr={isAr} />
+        })()}
+
+        {(() => {
+          const outfitGenderForTrack: Gender = outfit.gender === 'female' ? 'female' : 'male'
+          const trackable = pieces.map(piece => {
+            const specificBrand = piece.pieceKey ? (perPieceBrands?.[piece.pieceKey] ?? null) : null
+            const brandInfo = detectPieceBrand(piece.value, brand, specificBrand)
+            const firstOption = piece.value.split(/\s+or\s+/i)[0] ?? piece.value
+            const categoryLink = getCategoryBrandLink(piece.value, outfitGenderForTrack)
+            return {
+              name: firstOption.trim().slice(0, 80),
+              url: brandInfo?.url ?? categoryLink.url,
+              brand: brandInfo?.brand ?? categoryLink.label,
+            }
+          })
+          return <OutfitPriceTracker trackablePieces={trackable} userId={user?.id} isAr={isAr} />
+        })()}
       </div>
 
       <div className="fixed bottom-0 left-0 right-0 z-40 px-5 pt-8 bg-gradient-to-t from-black via-black/95 to-transparent" style={{ paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom))' }}>

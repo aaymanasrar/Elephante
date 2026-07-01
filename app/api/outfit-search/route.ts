@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { chatWithFallback, extractJSON } from '@/services/aiProviders'
 import { buildLocalAdviceResponse } from '@/lib/stylistFallback'
 import { rateLimit } from '@/lib/rateLimit'
+import { getBrandsForCity } from '@/lib/regionalBrands'
 
 // ─── Advice queries ───────────────────────────────────────────────────────────
 const ADVICE_SIGNALS = [
@@ -112,19 +113,29 @@ type WeatherPayload = {
   condition?: unknown
 }
 
-function buildWeatherSummary(weather: WeatherPayload | null | undefined, language?: string) {
+function buildWeatherSummary(weather: WeatherPayload | null | undefined) {
   const city = typeof weather?.city === 'string' ? weather.city.trim() : ''
   const condition = typeof weather?.condition === 'string' ? weather.condition.trim() : ''
   const temperature = Number(weather?.temperature_c)
   if (!city || !condition || !Number.isFinite(temperature)) return ''
 
   const roundedTemp = Math.round(temperature)
-  if (language === 'ar') return `طقس اليوم في ${city}: ${roundedTemp}°C و${condition}`
-  return `today's weather in ${city}: ${roundedTemp}°C and ${condition}`
+  return `${city}: ${roundedTemp}°C and ${condition}`
 }
 
-function withWeatherOpening(response: string | undefined, weather: WeatherPayload | null | undefined, language?: string) {
-  return (response || '').trim()
+function cardCountForFollowUp(history: Array<{ role: 'user' | 'assistant'; content: string }>) {
+  const userQueries = history.filter((turn) => turn.role === 'user').length
+  return Math.max(1, 3 - Math.max(0, userQueries - 1))
+}
+
+function withWeatherOpening(response: string | undefined, city?: string) {
+  const text = (response || '').trim()
+  if (!text || !city) return text
+  const lower = text.toLowerCase()
+  const cityLower = city.toLowerCase()
+  // Only prepend if the response doesn't already mention the city
+  if (lower.includes(cityLower)) return text
+  return `In ${city}, ${text.charAt(0).toLowerCase()}${text.slice(1)}`
 }
 
 // ─── Advice system ────────────────────────────────────────────────────────────
@@ -267,11 +278,11 @@ Rainy: practical fabrics, closed shoes, minimal silk
 ════════════════════════════════════════
 OUTPUT FORMAT
 ════════════════════════════════════════
-Generate EXACTLY 3 outfit cards. Return ONLY valid JSON (no markdown, no code fences):
+Generate the exact number of outfit cards requested by the user. Return ONLY valid JSON (no markdown, no code fences):
 
 {
   "intent": "2–4 word label for what they need",
-  "response": "1–2 sentences explaining what types of fabrics and colors will go well based on the weather, the user's skin tone, gender, and their preference. Do NOT start by explicitly stating the weather (e.g. avoid 'According to today's weather...'). Instead, naturally weave in why certain materials or tones are chosen.",
+  "response": "1–2 sentences. Open naturally with the city name (e.g. 'In Khobar,' or 'For your evening in Dubai,') to anchor the advice to the user's location. Then explain what fabrics and colors suit the weather and their profile.",
   "vibe": "3 evocative words",
   "cards": [
     {
@@ -287,6 +298,13 @@ Generate EXACTLY 3 outfit cards. Return ONLY valid JSON (no markdown, no code fe
         "shoes": "Exact footwear with colour",
         "accessories": "Key accessories or null",
         "outerwear": "Outerwear or null"
+      },
+      "brands": {
+        "top": "Real brand name (e.g. Uniqlo, Zara, H&M, COS, Arket, Mango, Ralph Lauren, Tommy Hilfiger, Lacoste, Nike, Adidas, New Balance, Vans, Converse, Levi's, Stone Island, Acne Studios, A.P.C, Arc'teryx) — or null for cultural/custom garments",
+        "bottom": "Real brand name or null",
+        "shoes": "Real brand name or null",
+        "accessories": "Real brand name or null",
+        "outerwear": "Real brand name or null"
       },
       "why_it_works": "1–2 sentences referencing the user's skin tone or body shape AND the cultural or occasion context specifically",
       "styling_tip": "One specific, physical styling instruction",
@@ -351,19 +369,30 @@ export async function POST(req: NextRequest) {
   const rl = rateLimit(req, { limit: 20, window: 60 })
   if (!rl.ok) return NextResponse.json({ error: 'Too many requests' }, { status: 429, headers: { 'Retry-After': String(rl.retryAfter) } })
 
-  let body: any
+  let body: unknown
   try { body = await req.json() } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
   }
 
   try {
-    const { query, name, gender, skin_tone, body_shape, height, style_pref, history, language, weather } = body
+    const { query, name, gender, skin_tone, body_shape, height, style_pref, history, language, weather } = body as {
+      query?: string
+      name?: string
+      gender?: string
+      skin_tone?: string
+      body_shape?: string
+      height?: string
+      style_pref?: string
+      history?: Array<{ role: 'user' | 'assistant'; content: string }>
+      language?: string
+      weather?: WeatherPayload | null
+    }
     const responseLanguage = language === 'ar' ? 'Arabic' : 'English'
-    if (!query || typeof query !== 'string') return NextResponse.json({ error: 'query required' }, { status: 400 })
-    const weatherSummary = buildWeatherSummary(weather, language)
+    if (!query) return NextResponse.json({ error: 'query required' }, { status: 400 })
+    const weatherSummary = buildWeatherSummary(weather)
 
     const priorTurns: Array<{ role: 'user' | 'assistant'; content: string }> = Array.isArray(history) ? history : []
-    const firstName = (name || 'there').split(' ')[0]
+    const firstName = (name || 'there').split(' ')[0] ?? 'there'
 
     // ── Off-topic ──
     if (isOutOfContextQuery(query)) {
@@ -407,7 +436,7 @@ export async function POST(req: NextRequest) {
         const localAdvice = buildLocalAdviceResponse({
           query, name: firstName, skinTone: skin_tone, bodyShape: body_shape, language,
         })
-        const adviceText = withWeatherOpening(parsed?.response || result.content.trim(), weather, language)
+        const adviceText = withWeatherOpening(parsed?.response || result.content.trim())
         const colors = Array.isArray(parsed?.colors) && parsed.colors.length ? parsed.colors : localAdvice.colors
 
         if (adviceText) {
@@ -423,7 +452,7 @@ export async function POST(req: NextRequest) {
       const localAdvice = buildLocalAdviceResponse({ query, name: firstName, skinTone: skin_tone, bodyShape: body_shape, language })
       return NextResponse.json({
         ...localAdvice,
-        response: withWeatherOpening(localAdvice.response, weather, language),
+        response: withWeatherOpening(localAdvice.response),
       })
     }
 
@@ -438,12 +467,22 @@ export async function POST(req: NextRequest) {
       weatherSummary && `Current weather/location: ${weatherSummary}`,
     ].filter(Boolean).join('\n')
 
+    const requestedCardCount = cardCountForFollowUp(priorTurns)
+    const regionBrands = getBrandsForCity(typeof weather?.city === 'string' ? weather.city : null)
+    const brandInstruction = regionBrands
+      ? `AVAILABLE BRANDS IN ${regionBrands.regionNote}: ${regionBrands.brandList.join(', ')}\nOnly suggest brands from this list in the "brands" field. Use null for pieces where none of these brands are a natural fit.`
+      : `Suggest globally accessible brands (e.g. Zara, H&M, Nike, Adidas, Uniqlo, Mango) in the "brands" field. Use null if no clear brand applies.`
+
+    const effectiveCity = typeof weather?.city === 'string' && weather.city.trim() ? weather.city.trim() : null
     const prompt = `USER PROFILE:
 ${userProfile}
 
 USER REQUEST: "${query}"
 
-Generate 3 outfit cards for this request. Detect cultural context from both the weather city and query. All user-facing text must be in ${responseLanguage}.
+${brandInstruction}
+
+Generate ${requestedCardCount} outfit cards for this request. Detect cultural context from both the weather city and query.${effectiveCity ? ` Open the "response" field with the city name ("In ${effectiveCity},") to ground the advice in the user's location.` : ''}
+All user-facing text must be in ${responseLanguage}.
 Return ONLY the JSON object — no markdown, no explanation.`
 
     try {
@@ -458,13 +497,14 @@ Return ONLY the JSON object — no markdown, no explanation.`
 
       const parsed = extractJSON(result.content)
       if (parsed?.cards?.length) {
+        const availableCards = Array.isArray(parsed.cards) ? parsed.cards.slice(0, requestedCardCount) : []
         return NextResponse.json({
           mode: 'cards',
           intent: parsed.intent || query,
-          response: withWeatherOpening(parsed.response, weather, language),
+          response: withWeatherOpening(parsed.response, effectiveCity ?? undefined),
           vibe: parsed.vibe || '',
           suggestions: [],
-          cards: parsed.cards,
+          cards: availableCards,
           provider: result.provider,
         })
       }
@@ -475,18 +515,20 @@ Return ONLY the JSON object — no markdown, no explanation.`
 
     // Local fallback: return 3 generic cards so the user always gets something
     const fallbackCards = buildFallbackCards(query, gender || 'male', language || 'en')
+    const fallbackResponse = language === 'ar'
+      ? (effectiveCity ? `في ${effectiveCity}، اخترت لك أقمشة وألوان تناسب الطقس وتلائم ذوقك.` : 'لقد اخترت لك أقمشة وألوان تناسب الطقس الحالي وتلائم ذوقك.')
+      : withWeatherOpening("I've chosen breathable fabrics and colors tailored to the current weather and your profile. Here are some looks:", effectiveCity ?? undefined)
     return NextResponse.json({
       mode: 'cards',
       intent: query,
-      response: language === 'ar' 
-        ? 'لقد اخترت لك أقمشة وألوان تناسب الطقس الحالي وتلائم ذوقك.' 
-        : "I've chosen breathable fabrics and colors tailored to the current weather and your profile. Here are some looks:",
+      response: fallbackResponse,
       vibe: '',
       suggestions: [],
-      cards: fallbackCards,
+      cards: fallbackCards.slice(0, requestedCardCount),
     })
-  } catch (err: any) {
-    console.error('[outfit-search]', err.message)
-    return NextResponse.json({ error: err.message }, { status: 500 })
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Unknown error'
+    console.error('[outfit-search]', message)
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }

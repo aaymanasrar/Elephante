@@ -64,19 +64,34 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Provide city name or lat/lon coordinates' }, { status: 400 })
     }
 
-    // Fetch current weather from Open-Meteo
+      // Fetch current weather plus forecast from Open-Meteo
     const weatherRes = await fetch(
-      `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weathercode,wind_speed_10m&temperature_unit=celsius`,
+      `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true&daily=weathercode,temperature_2m_max,temperature_2m_min&temperature_unit=celsius&timezone=auto`,
     )
     if (!weatherRes.ok) {
       return NextResponse.json({ error: 'Weather service unavailable' }, { status: 502 })
     }
     const weatherData = await weatherRes.json()
 
-    const current = weatherData.current
-    const temperature_c: number = current.temperature_2m
-    const condition: string     = wmoToCondition(current.weathercode)
-    const wind_kph: number      = current.wind_speed_10m
+    const current = weatherData.current_weather
+    let temperature_c: number = typeof current?.temperature === 'number' ? current.temperature : NaN
+    let condition: string = wmoToCondition(typeof current?.weathercode === 'number' ? current.weathercode : 0)
+    const wind_kph: number = typeof current?.wind_speed === 'number' ? current.wind_speed : NaN
+
+    if (Array.isArray(weatherData.daily?.time) && Array.isArray(weatherData.daily?.weathercode) && Array.isArray(weatherData.daily?.temperature_2m_max)) {
+      const today = new Date().toISOString().slice(0, 10)
+      const dateIndex = weatherData.daily.time.findIndex((date: string) => date === today)
+      const nextIndex = dateIndex >= 0 ? Math.min(dateIndex + 1, weatherData.daily.time.length - 1) : 0
+      const now = new Date().getHours()
+      const useTomorrow = now >= 15 && nextIndex !== dateIndex
+      const forecastIndex = useTomorrow ? nextIndex : dateIndex
+      const forecastCode = Number(weatherData.daily.weathercode[forecastIndex])
+      const forecastTemp = Number(weatherData.daily.temperature_2m_max[forecastIndex])
+      if (Number.isFinite(forecastTemp) && forecastCode >= 0) {
+        temperature_c = forecastTemp
+        condition = wmoToCondition(forecastCode)
+      }
+    }
 
     return NextResponse.json({ city: displayName, temperature_c, condition, wind_kph })
   } catch (err: unknown) {

@@ -3,6 +3,7 @@
 import type { ChangeEvent } from 'react'
 import { useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { analyzeWardrobeWithAIServer, formatCulturalTags } from '@/services/analyzeWardrobeWithAI'
 
 export interface WardrobeTag {
   id: 'color' | 'item_type' | 'material' | 'pattern' | 'formality' | 'occasion'
@@ -13,6 +14,7 @@ export interface WardrobeAttachment {
   preview: string
   uploading: boolean
   confirming: boolean
+  analyzing: boolean
   image_url: string
   storage_path: string
   original_image_url?: string
@@ -32,6 +34,8 @@ export interface WardrobeAttachment {
   occasion: string
   style_query: string
   tags: WardrobeTag[]
+  perfect_visual_prompt?: string
+  cultural_tags?: string[]
   error?: string
 }
 
@@ -54,6 +58,7 @@ export function useWardrobeAttachment(userId: string, onStyleQuery: (query: stri
       preview,
       uploading: true,
       confirming: false,
+      analyzing: false,
       image_url: '',
       storage_path: '',
       item_name: 'Identifying...',
@@ -91,6 +96,7 @@ export function useWardrobeAttachment(userId: string, onStyleQuery: (query: stri
         preview,
         uploading: false,
         confirming: false,
+        analyzing: false,
         image_url: data.image_url,
         storage_path: data.storage_path,
         original_image_url: data.original_image_url,
@@ -199,13 +205,47 @@ export function useWardrobeAttachment(userId: string, onStyleQuery: (query: stri
     if (options?.clearSearch !== false) onClearSearch()
   }
 
+  const analyzeWithAIServer = async () => {
+    if (!attachment || !attachment.image_url) return
+
+    setAttachment((prev) => prev ? { ...prev, analyzing: true } : null)
+
+    try {
+      const result = await analyzeWardrobeWithAIServer(
+        attachment.image_url,
+        attachment.item_name,
+        attachment.item_type,
+        attachment.color,
+        attachment.occasion,
+      )
+
+      if (result) {
+        const culturalTags = formatCulturalTags(result)
+        setAttachment((prev) => prev ? {
+          ...prev,
+          analyzing: false,
+          perfect_visual_prompt: result.perfect_visual_prompt,
+          cultural_tags: culturalTags,
+        } : null)
+      } else {
+        setAttachment((prev) => prev ? { ...prev, analyzing: false } : null)
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'AI analysis failed'
+      console.error('[analyzeWithAIServer]', message)
+      setAttachment((prev) => prev ? { ...prev, analyzing: false } : null)
+    }
+  }
+
   return {
     attachment,
     clearAttachment,
     confirmAttachment,
+    analyzeWithAIServer,
     fileInputRef,
     attachFile,
     handleAttachment,
     updateTag,
   }
 }
+

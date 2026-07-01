@@ -17,6 +17,7 @@ export interface ExcelOutfit {
   occasions?: string | null
   when_to_wear?: string | null
   outfit_details?: string | null
+  pro_tip?: string | null
   hex_colors?: string[] | string | null
   material_top?: string | null
   material_bottom?: string | null
@@ -68,6 +69,7 @@ export interface GeneratedOutfitVariant {
   material_shoes?: string | null
   key_colors?: string[] | null
   gender?: string | null
+  brand?: string | null
   alternative?: GeneratedOutfitVariant | null
 }
 

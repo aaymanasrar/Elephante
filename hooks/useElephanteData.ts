@@ -57,7 +57,8 @@ export function useElephanteData(onUnauthenticated: () => void): ElephanteDataSt
         setUserBodyShape(bootstrapData.userBodyShape)
         setUserHeight(bootstrapData.userHeight)
         setUserStylePref(bootstrapData.userStylePref)
-        setUserAvatarUrl(bootstrapData.userAvatarUrl)
+        const defaultMemoji = bootstrapData.userGender === 'female' ? '/images/FF01.png' : '/images/MF01.png'
+        setUserAvatarUrl(bootstrapData.userAvatarUrl || defaultMemoji)
         setUserId(bootstrapData.userId)
         allOutfitsRef.current = bootstrapData.outfits
         setAllOutfits(bootstrapData.outfits)
@@ -67,9 +68,7 @@ export function useElephanteData(onUnauthenticated: () => void): ElephanteDataSt
         }
       } finally {
         setLoading(false)
-        if (typeof window !== 'undefined' && !localStorage.getItem('elephante_tour_done')) {
-          setShowTour(true)
-        }
+        // Tour disabled — users have already been onboarded
       }
     }
 

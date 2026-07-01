@@ -55,8 +55,8 @@ function resolveBrandUrl(brand: string): string | null {
   for (const [k, v] of Object.entries(BRAND_URLS)) {
     if (key.includes(k) || k.includes(key)) return v
   }
-  // Fallback: Google Shopping search
-  return `https://www.google.com/search?q=${encodeURIComponent(brand + ' buy online')}&tbm=shop`
+  // Fallback: Use a default brand website if not found
+  return BRAND_URLS["zara"] ?? null;
 }
 
 function isHttpUrl(value: unknown): value is string {
@@ -83,7 +83,7 @@ Return ONLY a raw JSON array with exactly ${pieces.length} objects in the same o
 ]
 
 Rules:
-- Prefer accessible brands and retailer pages: Uniqlo, Zara, H&M, Nike, Adidas, Massimo Dutti, Mango, COS, Ralph Lauren, Hugo Boss, ASOS, etc.
+- Prefer accessible brands and retailer pages: Uniqlo, Zara, H&M, Nike, Adidas, Massimo Dutti, Mango, COS, Ralph Lauren, Hugo Boss, etc.
 - Use web search and fetch URL content when useful.
 - If a piece is "null" or not a real item, return { "brand": null, "url": null }.
 - Do not include markdown or explanations.

@@ -1,10 +1,12 @@
 'use client'
 
 import Image from 'next/image'
-import { useState } from 'react'
-import type { ChangeEvent, ClipboardEvent, DragEvent, ReactNode, RefObject } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { ChangeEvent, ClipboardEvent as ReactClipboardEvent, DragEvent, ReactNode, RefObject } from 'react'
 import type { WardrobeAttachment } from '@/hooks/useWardrobeAttachment'
 import { useLocale } from '@/lib/locale-context'
+import CulturalTags from '@/app/components/CulturalTags'
+import StylistsVision from '@/app/components/StylistsVision'
 
 type AttachmentAnalysis = {
   outfit_name?: string
@@ -42,6 +44,7 @@ interface SearchFooterProps {
   isThinking: boolean
   keyboardOffset: number
   onAnalyzeAttachment?: () => void
+  onAnalyzeWithAIServer?: () => Promise<void>
   onInputChange: (value: string) => void
   onRateAttachment?: () => void
   onFindSimilar?: () => void
@@ -63,6 +66,7 @@ export default function SearchFooter({
   isThinking,
   keyboardOffset,
   onAnalyzeAttachment,
+  onAnalyzeWithAIServer,
   onInputChange,
   onRateAttachment,
   onFindSimilar,
@@ -72,6 +76,14 @@ export default function SearchFooter({
 }: SearchFooterProps) {
   const { isAr } = useLocale()
   const [draggingPhoto, setDraggingPhoto] = useState(false)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [inputValue])
   const copy = isAr ? {
     identifying: 'جارٍ التنظيف...',
     checking: 'جارٍ التحليل...',
@@ -120,7 +132,7 @@ export default function SearchFooter({
   const firstImageFile = (files: FileList | File[]) => {
     return Array.from(files).find((file) => file.type.startsWith('image/')) || null
   }
-  const clipboardImageFile = (event: ClipboardEvent<HTMLInputElement>) => {
+  const clipboardImageFile = (event: ReactClipboardEvent<HTMLElement>) => {
     const pastedFile = firstImageFile(event.clipboardData.files)
     if (pastedFile) return pastedFile
 
@@ -138,7 +150,7 @@ export default function SearchFooter({
     const file = firstImageFile(event.dataTransfer.files)
     if (file) await handleAttachmentFile(file)
   }
-  const attachPastedPhoto = async (event: ClipboardEvent<HTMLInputElement>) => {
+  const attachPastedPhoto = async (event: ReactClipboardEvent<HTMLElement>) => {
     const file = clipboardImageFile(event)
     if (!file) return
     event.preventDefault()
@@ -257,6 +269,45 @@ export default function SearchFooter({
                     )) : null}
                   </div>
                 </div>
+
+                {/* Cultural Tags Section */}
+                {attachment?.cultural_tags && attachment.cultural_tags.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-[8px] uppercase tracking-[0.28em] text-zinc-600">
+                      {isAr ? 'الأسلوب الثقافي' : 'Cultural Style'}
+                    </p>
+                    <CulturalTags tags={attachment.cultural_tags} className="flex flex-wrap gap-1.5" />
+                  </div>
+                )}
+
+                {/* Stylist's Vision Section */}
+                {attachment?.perfect_visual_prompt && (
+                  <div className="space-y-2">
+                    <p className="text-[8px] uppercase tracking-[0.28em] text-zinc-600">
+                      {isAr ? 'رؤية الأسلوب' : "Stylist's Vision"}
+                    </p>
+                    <StylistsVision prompt={attachment.perfect_visual_prompt} className="max-h-64 w-full" />
+                  </div>
+                )}
+
+                {/* AI Analysis Button */}
+                {!attachment?.perfect_visual_prompt && !attachment?.cultural_tags && canUseAttachment && onAnalyzeWithAIServer && (
+                  <button
+                    onClick={onAnalyzeWithAIServer}
+                    disabled={attachment?.analyzing || isAnalyzingAttachment}
+                    className="w-full rounded-full bg-gradient-to-r from-amber-600/30 to-orange-600/30 border border-amber-400/50 text-amber-200 text-[10px] uppercase tracking-[0.2em] py-2.5 hover:border-amber-300/70 hover:bg-gradient-to-r hover:from-amber-600/40 hover:to-orange-600/40 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {attachment?.analyzing ? (
+                      <>
+                        <span className="inline-block w-3 h-3 border border-amber-200 border-t-amber-400 rounded-full animate-spin mr-2" />
+                        {isAr ? 'جارٍ التحليل...' : 'Analyzing...'}
+                      </>
+                    ) : (
+                      <>{isAr ? 'تحليل الأسلوب الثقافي' : 'Analyze Style'}</>
+                    )}
+                  </button>
+                )}
+
                 <button
                   onClick={actionHandler}
                   disabled={!canUseAttachment || isAnalyzingAttachment || !actionHandler}
@@ -310,16 +361,20 @@ export default function SearchFooter({
           <div className="relative flex-1">
             <div id="tour-search" className="absolute inset-0 rounded-3xl pointer-events-none" />
             {placeholderOverlay}
-            <input
-              type="text"
+            <textarea
+              ref={textareaRef}
               dir={isAr ? 'rtl' : 'ltr'}
               value={inputValue}
+              rows={1}
               onChange={(event) => onInputChange(event.target.value)}
               onPaste={attachPastedPhoto}
               onKeyDown={(event) => {
-                if (event.key === 'Enter' && canSubmit) onSubmit()
+                if (event.key === 'Enter' && !event.shiftKey && canSubmit) {
+                  event.preventDefault()
+                  onSubmit()
+                }
               }}
-              className={`w-full bg-zinc-950/50 backdrop-blur-md border border-white/10 text-white text-base sm:text-sm rounded-3xl py-4 outline-none focus:ring-2 focus:ring-white/20 focus:border-white/25 transition-[border-color,box-shadow,background-color] duration-300 min-h-[56px] placeholder-transparent shadow-[0_12px_36px_rgba(0,0,0,0.22)] ${isAr ? 'pr-6 pl-14 text-right' : 'pl-6 pr-14 text-left'}`}
+              className={`w-full bg-zinc-950/50 backdrop-blur-md border border-white/10 text-white text-base sm:text-sm rounded-3xl py-4 outline-none focus:ring-2 focus:ring-white/20 focus:border-white/25 transition-[border-color,box-shadow,background-color] duration-300 min-h-[56px] placeholder-transparent shadow-[0_12px_36px_rgba(0,0,0,0.22)] resize-none overflow-hidden leading-snug ${isAr ? 'pr-6 pl-14 text-right' : 'pl-6 pr-14 text-left'}`}
               style={inputValue ? { boxShadow: '0 0 24px rgba(255,255,255,0.08), 0 12px 36px rgba(0,0,0,0.22)' } : {}}
               placeholder=" "
               autoComplete="off"
@@ -337,13 +392,6 @@ export default function SearchFooter({
                   <path d="M5 12h14M12 5l7 7-7 7" />
                 </svg>
               </button>
-            ) : null}
-            {isThinking || isAnalyzingAttachment ? (
-              <div className={`absolute ${isAr ? 'left-5' : 'right-5'} top-1/2 -translate-y-1/2 flex gap-[3px] items-center`} aria-hidden="true">
-                <span className="w-1.5 h-1.5 rounded-full bg-white/60 animate-bounce" style={{ animationDelay: '0ms' }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-white/40 animate-bounce" style={{ animationDelay: '120ms' }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-white/25 animate-bounce" style={{ animationDelay: '240ms' }} />
-              </div>
             ) : null}
           </div>
         </div>

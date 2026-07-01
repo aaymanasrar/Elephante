@@ -1,4 +1,4 @@
-import { getBrandShopLink, type Gender } from '@/lib/affiliates'
+import { getBrandShopLink, detectBrandInText, type Gender } from '@/lib/affiliates'
 
 const AESTHETIC_MAP = {
   neutral: { label: 'Neutral', swatches: ['#f5f0dc', '#d2b48c', '#ffffff'] },
@@ -35,10 +35,12 @@ function inferGender(piece: string, brand: string | null): Gender {
   return 'male'
 }
 
-export function detectPieceBrand(piece: string, brand: string | null) {
-  if (!brand) return null
+export function detectPieceBrand(piece: string, brand: string | null, perPieceBrand?: string | null) {
+  // Priority: explicit per-piece brand → text detection → outfit-level brand
+  const resolved = perPieceBrand || detectBrandInText(piece) || brand
+  if (!resolved) return null
 
-  const link = getBrandShopLink(brand, piece, inferGender(piece, brand))
+  const link = getBrandShopLink(resolved, piece, inferGender(piece, resolved))
   if (!link) return null
 
   return {

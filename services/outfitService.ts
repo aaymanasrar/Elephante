@@ -39,7 +39,10 @@ async function saveGeneratedOutfits(body: Record<string, unknown>) {
     body: JSON.stringify(body),
   })
 
-  const data = await response.json().catch(() => ({}))
+  const data = await response.json().catch((err) => {
+    console.warn('[outfitService] saveGeneratedOutfits JSON parse failed:', err)
+    return { error: 'Failed to parse response from save outfit' }
+  })
   if (!response.ok) {
     return {
       saved: [],

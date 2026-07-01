@@ -106,7 +106,10 @@ async function fetchFromHM(query: string, gender: string): Promise<Product[]> {
     }).finally(() => clearTimeout(t))
     if (!res.ok) return []
     let html: string
-    try { html = await res.text() } catch { return [] }
+    try { html = await res.text() } catch (err) {
+      console.error('[productSearch] fetchFromHM text extraction failed:', err)
+      return []
+    }
     // H&M embeds JSON in a script tag: window.__INITIAL_STATE__
     const match = html.match(/"products":\s*(\[[\s\S]*?\])\s*,\s*"productListFilter"/)
     if (!match) return []
@@ -114,7 +117,10 @@ async function fetchFromHM(query: string, gender: string): Promise<Product[]> {
     if (!productJson) return []
 
     let products: any[]
-    try { products = JSON.parse(productJson) } catch { return [] }
+    try { products = JSON.parse(productJson) } catch (err) {
+      console.error('[productSearch] fetchFromHM JSON parse failed:', err)
+      return []
+    }
     return products.slice(0, 5).map((p: any) => ({
       name:      p.name || '',
       brand:     'H&M',
@@ -124,7 +130,10 @@ async function fetchFromHM(query: string, gender: string): Promise<Product[]> {
       gender,
       category:  '',
     })).filter((p: Product) => p.url)
-  } catch { return [] }
+  } catch (err) {
+    console.error('[productSearch] fetchFromHM failed:', err)
+    return []
+  }
 }
 
 // ─── Uniqlo product API ───────────────────────────────────────────────────────
@@ -143,7 +152,10 @@ async function fetchFromUniqlo(query: string, gender: string): Promise<Product[]
     }).finally(() => clearTimeout(t))
     if (!res.ok) return []
     let data: any
-    try { data = await res.json() } catch { return [] }
+    try { data = await res.json() } catch (err) {
+      console.error('[productSearch] fetchFromUniqlo JSON parse failed:', err)
+      return []
+    }
     const items: any[] = data?.result?.items || data?.items || []
     return items.slice(0, 5).map((item: any) => ({
       name:      item.name || '',
@@ -154,7 +166,10 @@ async function fetchFromUniqlo(query: string, gender: string): Promise<Product[]
       gender,
       category:  '',
     })).filter((p: Product) => p.url)
-  } catch { return [] }
+  } catch (err) {
+    console.error('[productSearch] fetchFromUniqlo failed:', err)
+    return []
+  }
 }
 
 function isHttpUrl(value: unknown): value is string {

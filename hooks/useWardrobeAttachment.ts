@@ -46,7 +46,7 @@ export function useWardrobeAttachment(userId: string, onStyleQuery: (query: stri
   }
 
   const attachFile = async (file: File | null | undefined) => {
-    if (!file) return
+    if (!file || attachment?.uploading) return
 
     if (attachment?.preview?.startsWith('blob:')) URL.revokeObjectURL(attachment.preview)
     const preview = URL.createObjectURL(file)

@@ -1,16 +1,22 @@
 // ─── Product Search & Scraper ─────────────────────────────────────────────────
 // Fetches real products from authentic brand websites only (H&M, Uniqlo, etc.).
-// Results are cached in Supabase for 24 hours to avoid repeated scraping.
+// Results are cached in Supabase for 6 hours to avoid repeated scraping.
 // Fallback: Perplexity Pro Search for live web results from official brand pages.
 
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import { requireEnv } from '@/lib/env'
 import { hasPerplexityConfig, parseJSONFromText, runPerplexityProSearch } from '@/services/perplexity'
 
-const supabase = createClient(
-  requireEnv('NEXT_PUBLIC_SUPABASE_URL', 'product search'),
-  requireEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'product search')
-)
+let _supabase: SupabaseClient | null = null
+function getSupabase() {
+  if (!_supabase) {
+    _supabase = createClient(
+      requireEnv('NEXT_PUBLIC_SUPABASE_URL', 'product search'),
+      requireEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'product search')
+    )
+  }
+  return _supabase
+}
 
 export interface Product {
   name:      string
@@ -24,8 +30,8 @@ export interface Product {
 
 // ─── Cache helpers ────────────────────────────────────────────────────────────
 async function getCached(query: string, gender: string): Promise<Product[] | null> {
-  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
-  const { data } = await supabase
+  const cutoff = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString()  // 6h: keep prices near-live
+  const { data } = await getSupabase()
     .from('scraped_products')
     .select('*')
     .eq('query', query.toLowerCase())
@@ -37,18 +43,28 @@ async function getCached(query: string, gender: string): Promise<Product[] | nul
 
 async function saveToCache(products: Product[], query: string, gender: string) {
   if (!products.length) return
-  await supabase.from('scraped_products').insert(
+  await getSupabase().from('scraped_products').insert(
     products.map(p => ({ ...p, query: query.toLowerCase(), gender, scraped_at: new Date().toISOString() }))
   )
 }
 
 
 
+// ─── Market / region (accurate store links + local prices) ───────────────────
+// Set PRODUCT_MARKET in .env.local: e.g. en_us (default), en_gb, ar_ae, de_de
+const MARKET = (process.env.PRODUCT_MARKET || 'en_us').toLowerCase()
+const COUNTRY = MARKET.split('_')[1] || 'us'
+const UNIQLO_MARKET: Record<string, { path: string; locale: string }> = {
+  us: { path: 'us', locale: 'en' }, gb: { path: 'uk', locale: 'en' }, ae: { path: 'ae', locale: 'en' },
+  de: { path: 'de', locale: 'de' }, fr: { path: 'fr', locale: 'fr' }, in: { path: 'in', locale: 'en' },
+}
+const UQ = UNIQLO_MARKET[COUNTRY] ?? { path: 'us', locale: 'en' }
+
 // ─── H&M product API ──────────────────────────────────────────────────────────
 async function fetchFromHM(query: string, gender: string): Promise<Product[]> {
   const dept = gender === 'female' ? 'ladies' : 'men'
   const url =
-    `https://www2.hm.com/en_us/search-results.html` +
+    `https://www2.hm.com/${MARKET}/search-results.html` +
     `?q=${encodeURIComponent(query)}&department=${dept}_all&sort=RELEVANCE&image-size=small&image-quality=auto&limit=6`
 
   try {
@@ -64,32 +80,35 @@ async function fetchFromHM(query: string, gender: string): Promise<Product[]> {
     }).finally(() => clearTimeout(t))
     if (!res.ok) return []
     let html: string
-    try { html = await res.text() } catch { return [] }
+    try { html = await res.text() } catch (err) { console.warn('H&M response read failed:', err); return [] }
     // H&M embeds JSON in a script tag: window.__INITIAL_STATE__
-    const match = html.match(/"products":\s*(\[[\s\S]*?\])\s*,\s*"productListFilter"/)
-    if (!match) return []
+    const match =
+      html.match(/"products":\s*(\[[\s\S]*?\])\s*,\s*"productListFilter"/) ||
+      html.match(/"productList":\s*(\[[\s\S]*?\])\s*,\s*"pagination"/) ||
+      html.match(/"hits":\s*(\[[\s\S]*?\])\s*,\s*"total"/)
+    if (!match) { console.warn('[productSearch] H&M markup changed — no product JSON found'); return [] }
     const productJson = match[1]
     if (!productJson) return []
 
     let products: any[]
-    try { products = JSON.parse(productJson) } catch { return [] }
+    try { products = JSON.parse(productJson) } catch (err) { console.warn('H&M product JSON parse failed:', err); return [] }
     return products.slice(0, 5).map((p: any) => ({
       name:      p.name || '',
       brand:     'H&M',
       price:     p.price?.value ? `$${p.price.value}` : '',
-      url:       p.link ? `https://www2.hm.com${p.link}` : '',
+      url:       p.link ? `https://www2.hm.com${p.link}` : '',  // p.link is already market-prefixed
       image_url: p.images?.[0]?.url || '',
       gender,
       category:  '',
     })).filter((p: Product) => p.url)
-  } catch { return [] }
+  } catch (err) { console.error('H&M fetch failed:', err); return [] }
 }
 
 // ─── Uniqlo product API ───────────────────────────────────────────────────────
 async function fetchFromUniqlo(query: string, gender: string): Promise<Product[]> {
   const genderParam = gender === 'female' ? 'Women' : 'Men'
   const url =
-    `https://www.uniqlo.com/us/api/commerce/v5/en/products?` +
+    `https://www.uniqlo.com/${UQ.path}/api/commerce/v5/${UQ.locale}/products?` +
     `q=${encodeURIComponent(query)}&prefn1=gender&prefv1=${genderParam}&limit=6`
 
   try {
@@ -101,18 +120,18 @@ async function fetchFromUniqlo(query: string, gender: string): Promise<Product[]
     }).finally(() => clearTimeout(t))
     if (!res.ok) return []
     let data: any
-    try { data = await res.json() } catch { return [] }
+    try { data = await res.json() } catch (err) { console.warn('Uniqlo JSON parse failed:', err); return [] }
     const items: any[] = data?.result?.items || data?.items || []
     return items.slice(0, 5).map((item: any) => ({
       name:      item.name || '',
       brand:     'Uniqlo',
       price:     item.prices?.base?.value?.text || '',
-      url:       item.productId ? `https://www.uniqlo.com/us/en/products/${item.productId}.html` : '',
+      url:       item.productId ? `https://www.uniqlo.com/${UQ.path}/${UQ.locale}/products/${item.productId}.html` : '',
       image_url: item.mainPic || '',
       gender,
       category:  '',
     })).filter((p: Product) => p.url)
-  } catch { return [] }
+  } catch (err) { console.error('Uniqlo fetch failed:', err); return [] }
 }
 
 function isHttpUrl(value: unknown): value is string {
@@ -131,9 +150,9 @@ async function fetchFromPerplexity(query: string, gender: string, category?: str
         },
         {
           role: 'user',
-          content: `Find up to 5 currently shoppable ${gender} fashion products for: "${query}".
+          content: `Find up to 5 currently shoppable ${gender} fashion products for: "${query}". Shopper country code: "${COUNTRY.toUpperCase()}" — prefer the retailer's site/store for that country so prices are in the local currency and the page actually ships there.
 
-Prefer official retailer/product pages that can be purchased online. Use web search and fetch specific product pages when useful.
+Prefer official retailer/product pages that can be purchased online. Use web search and fetch specific product pages when useful. "price" must be the CURRENT price shown on the page including its currency symbol (e.g. "$29.90", "AED 129", "£24.99") — never guess or reuse stale prices.
 
 Return ONLY this JSON array shape:
 [
@@ -244,10 +263,10 @@ export async function searchOutfitPieces(
 
   const results = await Promise.all(
     entries.map(async ([key, piece]) => {
-      // Build query: prefer brand-specific search if brand is known
-      const query = piece.brand
-        ? `${piece.brand} ${piece.item}`
-        : piece.item
+      // Search by item only — a competitor brand name (e.g. "Zara ...") in an
+      // H&M/Uniqlo catalog query guarantees zero results. Perplexity still sees
+      // the brand via the outfit context when scrapers miss.
+      const query = piece.item
       const products = await searchProducts(query, gender, key)
       return [key, products] as [string, Product[]]
     })

@@ -1,16 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import { rateLimit } from '@/lib/rateLimit'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-)
+let _supabase: SupabaseClient | null = null
+function getSupabase() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    )
+  }
+  return _supabase
+}
 
 async function getUserFromRequest(req: NextRequest) {
   const token = req.headers.get('authorization')?.replace('Bearer ', '')
   if (!token) return null
-  const { data: { user } } = await supabase.auth.getUser(token)
+  const { data: { user } } = await getSupabase().auth.getUser(token)
   return user ?? null
 }
 
@@ -35,7 +41,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'outfit_id is required' }, { status: 400 })
   }
 
-  const { error } = await supabase.from('wear_logs').insert({ user_id: user.id, outfit_id })
+  const { error } = await getSupabase().from('wear_logs').insert({ user_id: user.id, outfit_id })
   if (error) {
     console.error('[wear-log POST]', error.message)
     return NextResponse.json({ error: 'Failed to log wear' }, { status: 500 })
@@ -59,7 +65,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'outfit_id query param is required' }, { status: 400 })
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('wear_logs')
     .select('worn_at')
     .eq('user_id', user.id)

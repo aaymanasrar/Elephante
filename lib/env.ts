@@ -30,10 +30,17 @@ export function optionalEnv(name: string) {
 }
 
 export function validateRequiredEnv(names: string[], context?: string) {
+  // During `next build` env vars may legitimately be absent (e.g. CI without
+  // secrets). Warn instead of crashing the build; runtime still throws on use.
+  const isBuildPhase = process.env.NEXT_PHASE === 'phase-production-build'
   for (const name of names) {
     const key = `${context || 'global'}:${name}`
     if (seen.has(key)) continue
-    requireEnv(name, context)
+    if (isBuildPhase) {
+      if (!readEnv(name)) console.warn(`[env] ${name} is not set (${context || 'global'}) — required at runtime.`)
+    } else {
+      requireEnv(name, context)
+    }
     seen.add(key)
   }
 }

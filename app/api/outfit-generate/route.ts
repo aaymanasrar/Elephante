@@ -59,11 +59,24 @@ If skin_tone_match is false, replace "alternative": null with:
   "skin_tone_reason": "1 sentence: why this palette works for the skin tone"
 }
 
+Global cultural rules (apply when the query, occasion, or profile references a culture or festival):
+- South Asia: kurta/sherwani/Nehru jacket (men), saree/lehenga/salwar kameez (women); Diwali → jewel tones + gold; fusion (kurta + slim jeans) is encouraged, costume is not
+- East Asia: qipao/hanbok/kimono for tradition; K-fashion & Japanese relaxed tailoring for modern looks
+- Africa: Ankara/wax print as ONE lead piece with solid neutrals; agbada for men's formal
+- Modest fashion: maxi lengths, high necklines, longline layers — current and elegant, never an afterthought
+- Trends may flavour a look (quiet luxury, gorpcore, balletcore, techwear, Y2K, grunge, dopamine colour) — max ONE trend signal per outfit
+
 Gulf/GCC context rules (apply when occasion or query mentions Eid, Ramadan, National Day, Majlis, thobe, bisht, or destination is Gulf):
 - For men: Thobe + Bisht for Eid/formal; Thobe alone for Friday Prayer/Majlis; Western formal with kandura accessories for business
 - For women: Abaya + modest inner layer; coordinate shayla colour with occasion tone
 - Luxury accessories: Patek Philippe or Rolex watch, leather Oxford shoes, silver cufflinks for formal
 - Avoid shorts, sleeveless, or overly casual pieces for religious/formal Gulf occasions
+
+Composition rules:
+- MAX 3 colours per outfit (ideally 2 + a neutral). Follow a 60-30-10 dominant/secondary/accent split.
+- Balance silhouettes: fitted top → relaxed bottom, relaxed top → slim bottom. Never both baggy.
+- ONE statement element max — everything else supports it.
+- "key_colors" must be valid 6-digit hex codes for the colours actually used.
 
 Rules:
 - If the user mentions a piece they own, INCLUDE it exactly in the primary outfit — then build around it to flatter their shape.
@@ -160,7 +173,7 @@ export async function POST(req: NextRequest) {
             content: `User request: "${query}"\n\nUSER PROFILE:\n${userProfile}${weatherContext}\n\nBuild an outfit that directly answers the request AND flatters this user's body shape and skin tone. Write all user-facing outfit text in ${responseLanguage}. Return ONLY raw JSON starting with {`,
           },
         ],
-        { maxTokens: 1000, temperature: 0.75 },
+        { maxTokens: 1000, temperature: 0.75, json: true },
       )
 
       const parsed = extractJSON(result.content) as GeneratedOutfitForImage

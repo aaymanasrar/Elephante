@@ -253,6 +253,10 @@ FASHION STYLES — MALE (use when gender = male)
 10. Y2K / Retro — slim silhouette, retro colourways or nylon/polyester fabrics, chunky Nike or New Balance. Brands: Adidas Originals, Nike Vintage, Pull&Bear, Bershka
 11. Soft Boy / Indie — earthy knits, corduroy trousers or overshirt, vintage-feel graphic tee, relaxed and textural. Brands: Arket, COS, & Other Stories
 12. Bold Statement — one loud jacket (printed, coloured, structured) with everything else toned down to black, white, or grey. The jacket IS the outfit.
+13. Techwear — black/graphite technical fabrics, tapered cargo, futuristic layers. Brands: Nike ACG, Arc'teryx, Carhartt WIP
+14. Old Money / Ivy — heritage tailoring, cable knits, loafers, tweed or flannel. Brands: Ralph Lauren, Massimo Dutti, Reiss
+15. Cultural Fusion — one authentic cultural garment (kurta, thobe, tang jacket, Ankara shirt) styled with modern tailoring
+16. Grunge / Rock — flannel or band tee, worn straight denim, leather or combat boot. Brands: Levi's, Dr. Martens, AllSaints
 
 ════════════════════════════════════════
 FASHION STYLES — FEMALE (use when gender = female)
@@ -269,6 +273,62 @@ FASHION STYLES — FEMALE (use when gender = female)
 10. Boho / Free Spirit — flowy tiered skirt or maxi dress, layered fine-chain necklaces, suede or leather sandals, woven bag, earthy palette. Brands: Mango, Zara, & Other Stories
 11. Athletic Luxe — matching set (biker shorts + sports bra or matching leggings + crop) + oversized zip hoodie + sleek sneaker. Brands: Lululemon, Alo Yoga, Nike, Adidas by Stella McCartney
 12. Bold Maximalist — ONE statement piece (printed maxi coat, sequin midi, coloured faux-fur) + everything else plain. Let the statement breathe. Brands: Zara, Mango, H&M
+13. Modest Elevated — maxi lengths, high necklines, wide-leg trousers, longline layers, coordinated hijab if worn. Brands: COS, Arket, Uniqlo, Mango
+14. Balletcore — wrap knit, flowing midi or straight-leg trouser, ballet flats, soft palette. Brands: Zara, & Other Stories
+15. Cultural Fusion — one authentic cultural piece (saree drape, qipao, Ankara print, embroidered kimono layer) with modern basics
+16. Mob Wife / Bold Glam — faux fur or leopard statement, black base, gold jewellery, heeled boot. Brands: Zara, Mango, H&M
+
+════════════════════════════════════════
+GLOBAL & CULTURAL FASHION INTELLIGENCE
+════════════════════════════════════════
+When the user's occasion, request, profile, or location references a culture, festival, or tradition, style AUTHENTIC garments correctly — never as costume, always with respect and modern polish.
+
+SOUTH ASIA (India, Pakistan, Bangladesh, Sri Lanka):
+• Men: kurta + churidar/pyjama or tailored trousers; Nehru/bandhgala jacket for formal; sherwani for weddings; juttis or loafers
+• Women: saree (chiffon/silk for evening, cotton/linen for day), lehenga for weddings, salwar kameez / anarkali for festive, kurti + palazzo for everyday fusion
+• Festivals: Diwali → jewel tones + gold accents; Eid → pastels, ivory, emerald; weddings → rich silks, zardozi, never plain black
+• Fusion done right: kurta over slim jeans + loafers; saree with a structured blazer; jutti with tailored trousers
+
+GULF & MIDDLE EAST:
+• Men: thobe/kandura (white for day, earth tones in winter) + bisht for high formal; ghutra/shemagh styled cleanly
+• Women: abaya (modern cuts — kimono, open-front, embroidered), coordinated shayla/hijab; elevated modest layering
+• Modest fashion is a global industry — longline silhouettes, wide-leg trousers, maxi lengths, high necklines can be stunning and current
+
+EAST ASIA:
+• Japan: kimono/yukata for tradition; everyday Japanese style = relaxed tailoring, wide silhouettes, muted tones (see Comme des Garçons, Issey Miyake, Uniqlo ethos)
+• Korea: hanbok for tradition; K-fashion = oversized blazers, monochrome layering, clean streetwear, GentleMonster-style accessories
+• China: qipao/cheongsam (evening, weddings), tang jacket; modern Chinese designers blend mandarin collars + contemporary tailoring
+
+AFRICA:
+• West Africa: Ankara/wax prints (bold, geometric) — modern tailoring in dresses, suits, headwraps (gele); agbada for men's formal
+• East/Horn: habesha kemis (Ethiopia/Eritrea) white cotton + woven borders
+• Styling rule: let one Ankara piece lead; keep companions solid neutral
+
+LATIN AMERICA & EUROPE HERITAGE:
+• guayabera (Caribbean/Mexico summer formal), poncho/ruana layering (Andes), huipil embroidery
+• European classics: British heritage (tweed, waxed cotton, tartan), French minimal chic, Italian sprezzatura (unstructured tailoring, loafers no socks), Scandinavian functional minimalism
+
+CULTURAL STYLING RULES:
+• Authenticity first: correct garment names, correct occasions, correct pairings
+• Modern fusion is encouraged; costume/caricature is forbidden
+• Religious/formal contexts (mosque, temple, church, funerals): default modest — covered shoulders/knees minimum
+• If the user names a festival (Diwali, Eid, Lunar New Year, Nowruz, Christmas, Hanukkah), reflect its palette and formality level
+
+════════════════════════════════════════
+CURRENT GLOBAL TRENDS (rotate into looks when they fit — never force)
+════════════════════════════════════════
+• Quiet luxury / Old money: logo-free neutrals, impeccable fit — still dominant
+• Gorpcore/outdoor luxe: technical shells, trail sneakers, cargos styled clean
+• Balletcore: wrap tops, flats, soft pinks, ribbon details
+• Mob wife: faux fur, leopard, bold gold, red lip energy
+• Y2K continues: low rise, baby tees, metallics, chunky sneakers
+• Techwear: black technical fabrics, straps, tapered cargo, futuristic silhouettes
+• Cottagecore: floaty florals, natural fabrics, prairie details
+• Grunge revival: flannel, band tees, worn denim, boots
+• Dopamine dressing: one saturated joyful colour as the statement
+• Sustainability: vintage, thrifted, repaired-visible pieces are a flex, not a compromise
+• Genderless tailoring: relaxed suiting worn by everyone
+Trend rule: an outfit may carry AT MOST one trend signal; the rest stays timeless.
 
 ════════════════════════════════════════
 OUTPUT FORMAT (STRICT JSON)
@@ -314,7 +374,29 @@ STRICT OUTPUT RULES
 • "how_to_wear" must be 3 short plain-English instructions — specific and physical, not vague
 • "why_it_works" MUST name the user's skin tone or body shape explicitly
 • "styling_tip" must be one VERY specific action (rolling, tucking, stacking, etc.)
+• DRESSES: for dress-based looks, put the full dress description in "top" and set "bottom" item and brand to null
+• Vary "ease" and "budget" realistically ACROSS the 3 outfits — do not default all three to Easy/Affordable
+• "key_colors" must be exactly 3 valid 6-digit hex codes matching the colours actually used
 `.trim()
+
+// ─── Output validation ────────────────────────────────────────────────────────
+const EASE_VALUES = ['Easy', 'Moderate', 'Statement']
+const BUDGET_VALUES = ['Affordable', 'Mid-range', 'Investment']
+const HEX_RE = /^#[0-9a-f]{6}$/i
+
+function normalizeOutfits(raw: any[]): any[] {
+  return raw
+    .filter(o => o && typeof o === 'object' && o.pieces?.top?.item && o.pieces?.shoes?.item)
+    .slice(0, 3)
+    .map(o => ({
+      ...o,
+      outfit_name: typeof o.outfit_name === 'string' && o.outfit_name.trim() ? o.outfit_name : 'Styled Look',
+      ease: EASE_VALUES.includes(o.ease) ? o.ease : 'Easy',
+      budget: BUDGET_VALUES.includes(o.budget) ? o.budget : 'Affordable',
+      how_to_wear: Array.isArray(o.how_to_wear) ? o.how_to_wear.filter((x: unknown) => typeof x === 'string').slice(0, 3) : [],
+      key_colors: Array.isArray(o.key_colors) ? o.key_colors.filter((c: unknown) => typeof c === 'string' && HEX_RE.test(c)).slice(0, 3) : [],
+    }))
+}
 
 // ─── Route ────────────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
@@ -365,11 +447,12 @@ RULES:
             content: `Generate 3 personalized outfit suggestions for this user. Apply all fashion rules.\n\nReturn ONLY a raw JSON object — no markdown, no code blocks, no explanation. Start your response with { and end with }.\n\n${userContext}`,
           },
         ],
-        { temperature: 0.8 }
+        { temperature: 0.7, json: true }
       )
 
       const parsed = extractJSON(response.content)
-      outfits = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.outfits) ? parsed.outfits : [])
+      const raw = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.outfits) ? parsed.outfits : [])
+      outfits = normalizeOutfits(raw)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
       console.warn('[outfit-ai] local stylist fallback:', message)
@@ -396,7 +479,9 @@ RULES:
           CORE.map(async (key) => {
             const piece = pieces[key]
             if (!piece?.item) return [key, []] as [string, Product[]]
-            const query = piece.brand ? `${piece.brand} ${piece.item}` : piece.item
+            // Search by item description only — including a competitor brand name
+            // (e.g. "Zara ...") in an H&M/Uniqlo catalog query guarantees misses.
+            const query = piece.item
             const products = await searchWithTimeout(query, gender, key)
             return [key, products] as [string, Product[]]
           })

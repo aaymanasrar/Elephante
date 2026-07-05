@@ -1,14 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import { optionalEnv, requireEnv } from '@/lib/env'
 import { generateEdenAIImage, hasEdenAIImageConfig } from '@/lib/edenaiImage'
 import { generateMagnificMysticImage, hasMagnificImageConfig } from '@/lib/magnificImage'
 import { buildCatalogMannequinImagePrompt } from '@/lib/outfitImagePrompt'
 
-const supabase = createClient(
-  requireEnv('NEXT_PUBLIC_SUPABASE_URL', 'outfit image fill'),
-  requireEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'outfit image fill'),
-)
+let _supabase: SupabaseClient | null = null
+function getSupabase() {
+  if (!_supabase) {
+    _supabase = createClient(
+      requireEnv('NEXT_PUBLIC_SUPABASE_URL', 'outfit image fill'),
+      requireEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'outfit image fill'),
+    )
+  }
+  return _supabase
+}
 
 interface FillOutfit {
   id?: string | number | null
@@ -122,7 +128,7 @@ export async function POST(req: NextRequest) {
     // Upload to Supabase Storage so we have a stable, fast URL
     const storagePath = `generated/${outfit.source_id || outfitId}.png`
 
-    const { error: uploadErr } = await supabase.storage
+    const { error: uploadErr } = await getSupabase().storage
       .from('Outfits')
       .upload(storagePath, generatedBuffer, { contentType: generatedContentType, upsert: true })
 
@@ -133,15 +139,15 @@ export async function POST(req: NextRequest) {
       console.warn('[outfit-image-fill] Storage upload failed:', uploadErr.message)
       imageUrl = fallbackImageUrl || ''
     } else {
-      const { data: { publicUrl } } = supabase.storage.from('Outfits').getPublicUrl(storagePath)
+      const { data: { publicUrl } } = getSupabase().storage.from('Outfits').getPublicUrl(storagePath)
       imageUrl = publicUrl
     }
 
     // Save URL back to the correct table so we don't regenerate next time
     if (source === 'excel' && outfit.id) {
-      await supabase.from('excel_outfits').update({ image_url: imageUrl }).eq('id', outfit.id)
+      await getSupabase().from('excel_outfits').update({ image_url: imageUrl }).eq('id', outfit.id)
     } else if (source === 'db' && outfitId) {
-      await supabase.from('outfits').update({ image_url: imageUrl }).eq('id', outfitId)
+      await getSupabase().from('outfits').update({ image_url: imageUrl }).eq('id', outfitId)
     }
 
     return NextResponse.json({ image_url: imageUrl })

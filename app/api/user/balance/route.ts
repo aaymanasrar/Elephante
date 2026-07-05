@@ -5,8 +5,15 @@ import { requireEnv } from '@/lib/env'
 export const runtime = 'nodejs'
 
 function getAuthClient(request: NextRequest) {
-  const supabaseUrl = requireEnv('NEXT_PUBLIC_SUPABASE_URL', 'the user balance route')
-  const supabaseAnonKey = requireEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'the user balance route')
+  let supabaseUrl: string
+  let supabaseAnonKey: string
+  try {
+    supabaseUrl = requireEnv('NEXT_PUBLIC_SUPABASE_URL', 'the user balance route')
+    supabaseAnonKey = requireEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'the user balance route')
+  } catch (envErr) {
+    console.error('Environment config error:', envErr)
+    throw new Error('Server misconfigured')
+  }
   const authorization = request.headers.get('authorization')
 
   if (!authorization?.startsWith('Bearer ')) {

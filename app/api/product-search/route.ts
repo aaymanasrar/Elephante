@@ -27,7 +27,9 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ error: 'Missing query or pieces' }, { status: 400 })
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 })
+  } catch (err) {
+    console.error('product-search failed:', err)
+    const message = err instanceof Error ? err.message : String(err)
+    return NextResponse.json({ error: message || 'Product search failed' }, { status: 500 })
   }
 }

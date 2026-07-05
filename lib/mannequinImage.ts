@@ -78,9 +78,11 @@ export function buildMannequinPromptForOutfit(outfit: MannequinOutfitLike, gende
 function pollinationsUrl(prompt: string, seed: number): string {
   const token = optionalEnv('POLLINATIONS_TOKEN')
   const params = new URLSearchParams({
-    width: '512',
-    height: '768',
+    // 3:4 portrait at the highest free tier resolution — much sharper garments
+    width: '768',
+    height: '1152',
     nologo: 'true',
+    enhance: 'true', // Pollinations LLM prompt-enhancement pass
     model: 'flux',
     seed: String(seed),
     ...(token ? { token } : {}),

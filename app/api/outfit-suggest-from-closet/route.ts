@@ -134,7 +134,7 @@ Return ONLY this JSON (no markdown, no explanation), with ai_verdict in ${isAr ?
       { role: 'user', content: prompt },
     ]
 
-    const responseContent = await chatWithFallback(turns, { maxTokens: 1000 })
+    const responseContent = await chatWithFallback(turns, { maxTokens: 1000, json: true })
     const textContent = responseContent.content || ''
     const parsed = extractJSON(textContent) as ParsedSuggestion
 

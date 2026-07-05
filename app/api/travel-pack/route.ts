@@ -122,7 +122,7 @@ export async function POST(req: NextRequest) {
         { role: 'system', content: SYSTEM },
         { role: 'user', content: userMessage },
       ],
-      { maxTokens: 1500, temperature: 0.7 }
+      { maxTokens: 1500, temperature: 0.7, json: true }
     )
 
     const parsed = extractJSON(result.content)

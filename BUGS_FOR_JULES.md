@@ -115,3 +115,15 @@ export async function GET(request: NextRequest) {
 - **All bugs are fixable** and improve reliability + debuggability
 
 Jules should prioritize bugs #1 and #2, then fix #3–#5.
+
+---
+
+## ✅ Status Update (2026-07-02)
+All 5 bugs above are FIXED. Additionally fixed (build-breaking):
+
+## 🐛 Bug #6: Module-scope env validation crashed `next build` — FIXED
+- `lib/supabase.ts` threw on import when env vars absent (imported in 19 files) → now a lazy Proxy client
+- `app/layout.tsx` → `validateRequiredEnv` in `lib/env.ts` now warns during build phase, still throws at runtime
+- `app/api/outfit-image-fill/route.ts`, `app/api/wear-log/route.ts`, `services/productSearch.ts` created Supabase clients at module scope → now lazy `getSupabase()`
+
+Result: `tsc --noEmit` ✓, `eslint` 0 errors ✓, `next build` ✓ (with or without env vars).

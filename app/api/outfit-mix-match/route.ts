@@ -70,7 +70,7 @@ Do not write any other explanation or markdown. Return ONLY the raw JSON.`
       { role: 'user', content: prompt }
     ]
 
-    const responseContent = await chatWithFallback(turns, { maxTokens: 1600 })
+    const responseContent = await chatWithFallback(turns, { maxTokens: 1600, json: true })
     const textContent = responseContent.content || ''
     const parsed = extractJSON(textContent) as Record<string, any>
 

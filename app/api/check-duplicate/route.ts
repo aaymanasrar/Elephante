@@ -77,7 +77,7 @@ export async function POST(req: NextRequest) {
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: userMessage },
       ],
-      { maxTokens: 200, temperature: 0.3 }
+      { maxTokens: 200, temperature: 0.3, json: true }
     )
 
     const parsed = extractJSON(result.content) as {

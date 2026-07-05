@@ -183,7 +183,7 @@ async function tryClaudeText(
       .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }))
 
     const response = await anthropic.messages.create({
-      model:      'claude-sonnet-4-6',
+      model:      'claude-sonnet-5',
       max_tokens: maxTokens ?? 4096,
       temperature,
       system,
@@ -191,20 +191,49 @@ async function tryClaudeText(
     })
 
     const content = (response.content[0] as any)?.text || ''
-    return { content, provider: 'Claude', model: 'claude-sonnet-4-6' }
+    return { content, provider: 'Claude', model: 'claude-sonnet-5' }
   } catch (err: any) {
     console.warn(`[ai] Claude failed: ${err.message} — trying next provider`)
     return null
   }
 }
 
+
+// Create a completion, requesting strict JSON mode when asked. Providers that
+// don't support response_format get one automatic retry without it.
+async function createCompletion(
+  client: OpenAI,
+  model: string,
+  messages: ChatMessage[],
+  temperature: number,
+  maxTokens: number | undefined,
+  wantJson: boolean,
+) {
+  const base = {
+    model, messages, temperature,
+    ...(maxTokens ? { max_tokens: maxTokens } : {}),
+  }
+  if (wantJson) {
+    try {
+      return await client.chat.completions.create({ ...base, response_format: { type: 'json_object' as const } })
+    } catch (err: any) {
+      const msg = String(err?.message || '').toLowerCase()
+      if (!msg.includes('response_format') && !msg.includes('json_object')) throw err
+      // Provider doesn't support JSON mode — fall through to plain completion
+    }
+  }
+  return client.chat.completions.create(base)
+}
+
 // ─── Main text fallback chain ─────────────────────────────────────────────────
 export async function chatWithFallback(
   messages: ChatMessage[],
-  options?: { temperature?: number; maxTokens?: number },
+  options?: { temperature?: number; maxTokens?: number; json?: boolean },
 ): Promise<AIResponse> {
-  const temp      = options?.temperature ?? 0.8
+  // JSON tasks want deterministic, schema-faithful output — lower default temp
+  const temp      = options?.temperature ?? (options?.json ? 0.4 : 0.8)
   const maxTok    = options?.maxTokens
+  const wantJson  = options?.json === true
   const available = TEXT_PROVIDERS.filter(p => p.apiKey)
 
   if (!available.length && !process.env.ANTHROPIC_API_KEY) {
@@ -224,10 +253,7 @@ export async function chatWithFallback(
           ? { 'HTTP-Referer': 'https://elephante.app', 'X-OpenRouter-Title': 'Elephante' }
           : {}
         const client = new OpenAI({ apiKey: provider.apiKey!, baseURL: provider.baseURL, timeout: 25000, maxRetries: 0, defaultHeaders: extraHeaders })
-        const completion = await client.chat.completions.create({
-          model: provider.model, messages, temperature: temp,
-          ...(maxTok ? { max_tokens: maxTok } : {}),
-        })
+        const completion = await createCompletion(client, provider.model, messages, temp, maxTok, wantJson)
         const content = completion.choices[0]?.message?.content || ''
         return { content, provider: provider.name, model: provider.model }
       } catch (err: any) {
@@ -264,10 +290,7 @@ export async function chatWithFallback(
       attempts++
       try {
         const client = new OpenAI({ apiKey: openai.apiKey!, timeout: 25000, maxRetries: 0 })
-        const completion = await client.chat.completions.create({
-          model: openai.model, messages, temperature: temp,
-          ...(maxTok ? { max_tokens: maxTok } : {}),
-        })
+        const completion = await createCompletion(client, openai.model, messages, temp, maxTok, wantJson)
         const content = completion.choices[0]?.message?.content || ''
         return { content, provider: openai.name, model: openai.model }
       } catch (err: any) {
@@ -359,8 +382,9 @@ export async function analyzeImageWithFallback(
     if (r) return r
   }
 
-  // 1.5. ALLaM-7B Arabic model (cultural fashion tags priority)
-  if (process.env.HUGGINGFACE_API_KEY && (prompt.toLowerCase().includes('cultural') || prompt.toLowerCase().includes('arabic') || prompt.toLowerCase().includes('أرابي'))) {
+  // 1.5. ALLaM-7B (text-only — it CANNOT see images, so it must be explicitly
+  // opted in via ALLAM_VISION=1; otherwise it hallucinates image analyses)
+  if (process.env.ALLAM_VISION === '1' && process.env.HUGGINGFACE_API_KEY && (prompt.toLowerCase().includes('cultural') || prompt.toLowerCase().includes('arabic') || prompt.toLowerCase().includes('أرابي'))) {
     const r = await tryALLaMVision(urls, prompt)
     if (r) return r
   }
@@ -376,14 +400,14 @@ export async function analyzeImageWithFallback(
     try {
       const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
       const response = await anthropic.messages.create({
-        model: 'claude-sonnet-4-6', max_tokens: 2048,
+        model: 'claude-sonnet-5', max_tokens: 2048,
         messages: [{ role: 'user', content: [
           ...images.map(toAnthropicImageBlock),
           { type: 'text',  text: prompt },
         ]}],
       })
       const content = (response.content[0] as any)?.text || ''
-      return { content, provider: 'Claude', model: 'claude-sonnet-4-6' }
+      return { content, provider: 'Claude', model: 'claude-sonnet-5' }
     } catch (err: any) {
       console.warn(`[vision] Claude failed: ${err.message}`)
       lastError = err
@@ -526,20 +550,27 @@ async function tryALLaMVision(
   }
 }
 
-// Extract JSON from a model response that may include markdown fences or preamble
+// Extract JSON (object or array) from a model response that may include
+// markdown fences, preamble text, or minor formatting slop.
 export function extractJSON(raw: string): any {
-  try {
-    const cleaned = raw
-      .replace(/^```(?:json)?\s*/im, '')
-      .replace(/\s*```\s*$/im, '')
-      .trim()
+  const cleaned = raw
+    .replace(/^[\s\S]*?```(?:json)?\s*/i, m => (m.includes('```') ? '' : m))
+    .replace(/```[\s\S]*$/, '')
+    .trim() || raw.trim()
 
-    const jsonStr = cleaned.startsWith('{')
-      ? cleaned
-      : (cleaned.match(/\{[\s\S]*\}/) ?? ['{}'])[0]
+  const candidates: string[] = []
+  if (cleaned.startsWith('{') || cleaned.startsWith('[')) candidates.push(cleaned)
+  const obj = cleaned.match(/\{[\s\S]*\}/)?.[0]
+  const arr = cleaned.match(/\[[\s\S]*\]/)?.[0]
+  if (obj) candidates.push(obj)
+  if (arr) candidates.push(arr)
 
-    return JSON.parse(jsonStr)
-  } catch {
-    return {}
+  for (const candidate of candidates) {
+    try { return JSON.parse(candidate) } catch { /* try next */ }
+    // Repair common model slop: trailing commas before } or ]
+    try { return JSON.parse(candidate.replace(/,\s*([}\]])/g, '$1')) } catch { /* try next */ }
   }
+
+  console.warn('[ai] extractJSON: no parseable JSON in response:', raw.slice(0, 200))
+  return {}
 }

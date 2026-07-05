@@ -61,7 +61,10 @@ export async function requestOutfitSearch({
       weather,
     }),
   })
-  const data = await response.json().catch(() => ({}))
+  const data = await response.json().catch((parseErr) => {
+    console.warn('Failed to parse response JSON:', parseErr)
+    return { error: 'Invalid server response' }
+  })
   if (!response.ok) {
     throw new Error(typeof data?.error === 'string' ? data.error : `outfit-search failed (${response.status})`)
   }
@@ -95,7 +98,10 @@ export async function requestOutfitGeneration({
       weather,
     }),
   })
-  const data = await response.json().catch(() => ({}))
+  const data = await response.json().catch((parseErr) => {
+    console.warn('Failed to parse response JSON:', parseErr)
+    return { error: 'Invalid server response' }
+  })
   if (!response.ok) {
     throw new Error(typeof data?.error === 'string' ? data.error : `outfit-generate failed (${response.status})`)
   }
